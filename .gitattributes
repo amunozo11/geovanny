@@ -1,0 +1,12 @@
+# El repositorio guarda todo con LF.
+#
+# El proyecto se desarrolla en Windows y se despliega en Linux: sin esto, un
+# archivo con fin de línea de Windows puede romper el contenedor de producción.
+* text=auto eol=lf
+
+# Binarios: que Git no los toque.
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.xlsx binary

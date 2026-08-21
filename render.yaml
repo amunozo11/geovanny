@@ -1,0 +1,44 @@
+# Despliegue en Render con un clic.
+#
+# Un solo servicio: entrega la aplicación y la API desde la misma dirección.
+# La base de datos va aparte, en MongoDB Atlas (ver docs/DEPLOYMENT.md).
+
+services:
+  - type: web
+    name: geovanny
+    runtime: node
+    region: virginia # el más cercano a Colombia y Venezuela de los disponibles
+    plan: starter # NO usar 'free': duerme a los 15 min y despierta en ~30 s
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TZ_NEGOCIO
+        value: America/Bogota
+      - key: COOKIE_SECURE
+        value: true
+      - key: LOG_LEVEL
+        value: info
+
+      # ── Se completan en el panel de Render, no aquí ───────────────────
+      - key: DATABASE_URL
+        sync: false # cadena de conexión de MongoDB Atlas
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false # la dirección pública del servicio
+      - key: ACCESO_ABIERTO
+        sync: false # 'true' = entra cualquiera con la dirección
+
+      # ── Primer administrador (retirar tras el primer arranque) ────────
+      - key: SEED_ADMIN_EMAIL
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+      - key: SEED_ADMIN_NAME
+        sync: false

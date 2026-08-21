@@ -1,0 +1,39 @@
+{
+  "name": "geovanny",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Sistema de gestión comercial multimoneda — compras, inventario, ventas, cartera y tasas",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "npm run build:shared && concurrently -n base,codigo,api,web -c gray,gray,blue,magenta \"npm:dev:db\" \"npm:dev:shared\" \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:db": "npm run db --workspace=server",
+    "dev:shared": "npm run dev --workspace=shared",
+    "dev:server": "npm run dev --workspace=server",
+    "dev:client": "npm run dev --workspace=client",
+    "build:shared": "npm run build --workspace=shared",
+    "build": "npm run build:shared && npm run build --workspace=client && npm run build --workspace=server",
+    "seed": "npm run seed --workspace=server",
+    "test": "npm run build:shared && npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"**/*.{ts,tsx,json,css}\"",
+    "start": "npm run start --workspace=server"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "concurrently": "^9.1.0",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.1"
+  }
+}

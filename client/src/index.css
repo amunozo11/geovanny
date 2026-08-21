@@ -1,0 +1,56 @@
+@import 'tailwindcss';
+
+/* Sistema visual (UX_FLOW.md §6): neutros fríos, un solo acento, sin gradientes. */
+@theme {
+  --color-brand-50: #eff6ff;
+  --color-brand-500: #2563eb;
+  --color-brand-600: #1d4ed8;
+  --color-brand-700: #1e40af;
+
+  --color-debe-500: #f59e0b; /* ámbar: saldo pendiente */
+  --color-ok-500: #10b981; /* verde: sin deuda */
+  --color-alerta-500: #f43f5e; /* rose: vencida o pérdida */
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+html {
+  /* 16px en inputs evita el zoom automático de iOS al enfocar (UX_FLOW.md §7) */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  /* 100dvh y no 100vh: la barra del navegador móvil no debe recortar la pantalla */
+  min-height: 100dvh;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    @apply bg-slate-950 text-slate-100;
+  }
+}
+
+/* Las columnas de dinero deben alinearse dígito con dígito */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Área segura inferior para la navegación en iPhone */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+input,
+select,
+textarea {
+  font-size: 16px;
+}

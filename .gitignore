@@ -1,0 +1,28 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Entorno — NUNCA versionar secretos (§43, §64)
+.env
+.env.*
+!.env.example
+
+# Datos locales
+mongo_data/
+.mongo-data/
+*.log
+logs/
+
+# Editor / SO
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Archivos de trabajo del negocio (contienen datos reales de clientes)
+*.xlsx
+*.xls
+!docs/**/*.md

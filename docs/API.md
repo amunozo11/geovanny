@@ -1,0 +1,257 @@
+# API.md — Los endpoints que existen
+
+REST sobre `/api`. Todo en JSON, fechas en UTC.
+
+> **Nota (20/08/2026):** este documento se reescribió para describir la API que
+> está construida. La versión anterior describía el diseño original —con
+> entidades separadas para ventas y compras, clientes y proveedores, cuentas por
+> cobrar y por pagar— que se unificó al implementarlo.
+
+**Los importes viajan siempre como texto**, nunca como número de JSON: un
+`number` de JavaScript no puede representar `906814.802000000001` sin perder
+precisión.
+
+```
+Authorization: Bearer <token>
+```
+
+Respuestas:
+
+```jsonc
+{ "data": { ... } }                                     // éxito
+{ "error": { "code": "SIN_STOCK", "message": "Solo quedan 80 bultos de PAPA.",
+             "rule": "RP-14", "details": { ... } } }    // error
+```
+
+`code` es estable y el cliente lo traduce; `rule` apunta a la regla de
+`BUSINESS_RULES.md` que se está haciendo cumplir, para poder rastrear cualquier
+rechazo hasta su justificación de negocio.
+
+Códigos: 200, 201, 400 datos inválidos, 401 sin sesión, 403 sin permiso,
+404 no existe, 422 lo impide una regla de negocio, 429 demasiadas peticiones,
+500, 502 falló un proveedor externo.
+
+---
+
+## `/api/auth`
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| POST | `/login` | `{email, password}` → token de acceso + cookie httpOnly de refresco |
+| POST | `/refresh` | Renueva el token. Es de un solo uso y rota; reutilizarlo cierra la sesión |
+| POST | `/logout` | Invalida la sesión |
+| GET | `/me` | Usuario y sus permisos |
+| POST | `/change-password` | |
+
+---
+
+## `/api/tasas`
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/` | Tasa vigente, su antigüedad en horas y el historial |
+| POST | `/` | Registrar a mano: `{usdCop, usdVes, mercado?, nota?}` |
+| POST | `/actualizar` | Consultar internet y guardar. Si falla, lo dice y no inventa nada |
+
+Dos números: cuánto vale el dólar en pesos y en bolívares. El cruce COP↔VES se
+deduce de ahí.
+
+---
+
+## `/api/productos`
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/` | `?q=` para buscar por nombre |
+| POST | `/` | `{nombre, unidad, precioVenta?, monedaVenta?}` |
+| PATCH | `/:id` | **No** toca el stock (RC-10) |
+| DELETE | `/:id` | Lo desactiva, no lo borra |
+| POST | `/:id/ajuste` | `{cantidad, tipo, motivo}` — el motivo es obligatorio |
+| GET | `/:id/movimientos` | Historial de por qué el stock es el que es |
+| GET | `/verificar-stock` | Recalcula desde los movimientos y avisa si algo no cuadra |
+
+`tipo` del ajuste: `MERMA` · `AJUSTE` · `DEVOLUCION`.
+
+---
+
+## `/api/personas`
+
+Clientes y proveedores comparten endpoint: son la misma entidad.
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/` | `?tipo=CLIENTE` (o `PROVEEDOR`, `TRANSPORTE`) y `?q=` |
+| POST | `/` | `{nombre, tipo}` — solo el nombre es obligatorio (CN-3) |
+| PATCH | `/:id` | |
+| GET | `/:id/cuenta` | **Estado de cuenta**: la persona, sus operaciones y sus abonos |
+
+`saldos` trae una deuda por moneda. Negativo significa saldo a favor.
+
+---
+
+## `/api/operaciones`
+
+Ventas y compras (viajes).
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/` | `?tipo=&personaId=&desde=&hasta=&pendientes=true&limite=` |
+| GET | `/:id` | |
+| POST | `/` | Crear. `?forzar=true` permite vender sin existencias |
+| POST | `/:id/anular` | `{motivo}` — revierte inventario y deuda. No hay DELETE ni edición |
+
+### `POST /api/operaciones`
+
+```jsonc
+{
+  "tipo": "VENTA",                    // VENTA | COMPRA
+  "personaId": "…",
+  "moneda": "VES",                    // en qué se pacta la operación
+  "items": [
+    { "productoId": "…", "cantidad": "20", "precio": "35000" }
+  ],
+  "cargue": [                         // solo compras (CN-15)
+    { "concepto": "Cargue y transporte", "monto": "1000000" }
+  ],
+  "formaPago": "FIADO",               // CONTADO | FIADO | PARCIAL
+  "pagado": "0",                      // si es PARCIAL
+  "nota": null
+}
+```
+
+Todo ocurre en **una transacción**: la operación, un movimiento de inventario
+por producto, el stock de cada producto y el saldo de la persona. O se guarda
+entero o no se guarda nada.
+
+En las compras, el cargue se reparte entre los productos según su valor y de ahí
+sale el costo real por unidad. En las ventas se congelan el costo y la utilidad.
+
+Errores propios: `SIN_STOCK` (422), `SIN_TASA` (422 — hay que registrar la tasa
+antes de operar), `PAGO_MAYOR`, `CANTIDAD_INVALIDA`, `SIN_ITEMS`.
+
+---
+
+## `/api/pagos`
+
+Abonos, en las dos direcciones.
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/` | `?personaId=&direccion=&limite=` |
+| POST | `/` | Registrar abono |
+| POST | `/:id/anular` | `{motivo}` — devuelve el saldo a las operaciones |
+
+### `POST /api/pagos`
+
+```jsonc
+{
+  "personaId": "…",
+  "direccion": "ENTRA",               // ENTRA cobras · SALE le pagas al proveedor
+  "monto": "300",
+  "moneda": "USD",                    // en qué te paga
+  "aplicaA": "VES",                   // a qué deuda se aplica (§8)
+  "metodo": "EFECTIVO",
+  "tasaAcordada": null                // { usdCop, usdVes } si se pacta otra (§21)
+}
+```
+
+La respuesta trae `montoAplicado` (cuánto bajó la deuda, en su moneda),
+`asignaciones` (a qué operaciones fue, de la más antigua a la más nueva) y
+`aFavor` (lo que sobró y queda a favor de la persona).
+
+---
+
+## `/api/gastos`
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/` | `?desde=` |
+| POST | `/` | `{categoria, tipo, descripcion, monto, moneda}` |
+| POST | `/:id/anular` | |
+
+---
+
+## `/api/cajas`
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/` | `?moneda=` añade el equivalente de cada saldo a la tasa de hoy |
+| GET | `/movimientos` | `?cajaId=` — de dónde salió cada peso |
+| POST | `/` | `{nombre, moneda, tipo, saldoInicial?}` |
+| POST | `/:id/ajuste` | `{saldoReal, motivo}` — se dice cuánto hay, no la diferencia |
+| POST | `/traslado` | `{origenId, destinoId, monto, montoDestino?}` |
+| GET | `/verificar` | Recalcula los saldos desde los movimientos y avisa si algo no cuadra |
+
+El traslado entre cajas de distinta moneda es un **cambio de divisa** (§16):
+`montoDestino` es lo que realmente recibiste, y de ahí sale la tasa. Si se omite,
+se usa la tasa del día.
+
+El dinero de las ventas, abonos y gastos entra y sale de las cajas
+automáticamente; `cajaId` es opcional en esas operaciones y por defecto se usa la
+caja de esa moneda.
+
+---
+
+## `/api/dias`
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/` | `?cantidad=14&moneda=` — resumen de los últimos días, uno por línea |
+| GET | `/:dia` | `2026-08-20` — **todo lo que se registró ese día**, con sus totales |
+
+El detalle trae los movimientos en orden cronológico —ventas, abonos, viajes,
+gastos y mermas— y los totales del día: vendido, de contado, fiado, cobrado,
+comprado, gastado y "entró menos salió".
+
+El día es el del negocio (`TZ_NEGOCIO`, por defecto `America/Bogota`), no el del
+servidor: una venta de las 8 p. m. pertenece a ese día aunque en UTC ya sea el
+siguiente.
+
+Ventas, viajes, abonos y gastos aceptan `fecha`, para registrar hoy algo que
+ocurrió ayer.
+
+---
+
+## `/api/resumen`
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/` | `?moneda=COP` (o `USD`, `VES`) — **todo el inicio en una sola llamada** |
+
+Una petición y no doce: en el celular, cada petición extra se nota.
+
+Devuelve `meDeben` y `debo` (con el detalle por moneda y el consolidado), ventas
+de hoy y del mes, compras, gastos, ganancia, inventario, quién te debe, últimas
+ventas, **el dinero que hay en cada caja** y la tasa usada. Si todavía no hay tasa registrada, devuelve
+`{ sinTasa: true }` en vez de inventarse cifras.
+
+---
+
+## `/api/health`
+
+Estado de la API y de la base de datos. No pide sesión.
+
+---
+
+## Permisos por rol
+
+| Acción | ADMIN | VENDEDOR | CAJERO | CONSULTA |
+|---|:--:|:--:|:--:|:--:|
+| Vender | ✅ | ✅ | ✅ | — |
+| Anular | ✅ | — | — | — |
+| Registrar abonos | ✅ | ✅ | ✅ | — |
+| Comprar (viajes) | ✅ | — | — | — |
+| Ajustar inventario | ✅ | — | — | — |
+| Productos | ✅ | ver | ver | ver |
+| Clientes | ✅ | crear | ver | ver |
+| Gastos | ✅ | — | ✅ | ver |
+| Tasas | ✅ | ver | ✅ | ver |
+| Usuarios y configuración | ✅ | — | — | — |
+
+---
+
+## Lo que no existe, a propósito
+
+No hay descarga de informes en PDF, Excel ni CSV: la información se consulta en
+pantalla (decidido el 20/08/2026). Tampoco hay nada relacionado con vencimientos
+ni mora, porque **las deudas no vencen** (`RC-31`).

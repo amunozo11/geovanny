@@ -1,0 +1,8 @@
+# La documentación se escribe con tablas alineadas a mano y diagramas ASCII:
+# el reformateo automático los estropea.
+docs/
+README.md
+
+node_modules/
+dist/
+coverage/
