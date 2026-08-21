@@ -10,6 +10,7 @@ import { corsOrigins, env, isProduction } from './config/env.js';
 import { requestId } from './middleware/requestId.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { apiRouter } from './routes/index.js';
+import { ForbiddenError } from './lib/errors.js';
 
 const aqui = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,14 +51,36 @@ export function createApp() {
     }),
   );
 
+  /**
+   * La aplicación y la API viven en la misma dirección, así que lo primero es
+   * permitir las peticiones que vienen de la propia página.
+   *
+   * Sin esto, cualquier POST desde la aplicación publicada fallaría salvo que
+   * alguien se acordara de poner la dirección exacta en `CORS_ALLOWED_ORIGINS`
+   * — y esa dirección no se conoce hasta después de desplegar.
+   */
   app.use(
-    cors({
-      origin: (origin, callback) => {
-        // Sin origin = petición del propio servidor o de una app nativa.
-        if (!origin || corsOrigins.includes(origin)) return callback(null, true);
-        return callback(new Error(`Origen no permitido por CORS: ${origin}`));
-      },
-      credentials: true,
+    cors((peticion, callback) => {
+      const origen = peticion.headers.origin;
+
+      // Sin origen: petición del propio servidor, de curl o de una app nativa.
+      if (!origen) return callback(null, { origin: true, credentials: true });
+
+      const mismaDireccion = (() => {
+        try {
+          return new URL(origen).host === peticion.headers.host;
+        } catch {
+          return false;
+        }
+      })();
+
+      if (mismaDireccion || corsOrigins.includes(origen)) {
+        return callback(null, { origin: true, credentials: true });
+      }
+
+      // Un error corriente saldría como 500 y parecería un fallo del servidor;
+      // esto es un rechazo deliberado y debe decirlo.
+      return callback(new ForbiddenError(`Origen no permitido: ${origen}`));
     }),
   );
 

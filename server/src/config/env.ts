@@ -57,7 +57,18 @@ const schema = z.object({
   SEED_BUSINESS_NAME: z.string().optional(),
 });
 
-const parsed = schema.safeParse(process.env);
+/**
+ * Las variables vacías se tratan como "no puesta".
+ *
+ * En los paneles de Vercel y Render es fácil dejar una casilla en blanco. Sin
+ * esto, un `PORT=""` se convierte en 0, no pasa la validación y la aplicación
+ * no arranca — con un error que no dice nada de dónde estaba el problema.
+ */
+const sinVacias = Object.fromEntries(
+  Object.entries(process.env).filter(([, valor]) => valor !== undefined && valor !== ''),
+);
+
+const parsed = schema.safeParse(sinVacias);
 
 if (!parsed.success) {
   const detail = parsed.error.issues
