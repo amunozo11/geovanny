@@ -39,8 +39,7 @@ Medidas mínimas que sí conviene tomar:
 
 - **No compartir la dirección** ni publicarla en ningún sitio.
 - Dejar la dirección larga que asigna el proveedor
-  (`geovanny-a1b2c3.onrender.com`) en vez de un dominio corto y fácil de
-  adivinar.
+  (`geovanny-a1b2c3.vercel.app`) en vez de un dominio corto y fácil de adivinar.
 - Guardarla como marcador y no enviarla por grupos de WhatsApp.
 
 **Para cerrar la puerta en cualquier momento**, sin tocar código: cambiar la
@@ -76,7 +75,46 @@ reales de los que dependas.
 
 ## Paso 2 · El servidor
 
-### Opción A — Render (la más simple)
+### Opción A — Vercel (gratis)
+
+El repositorio trae `vercel.json` y `api/index.js`, así que Vercel lo entiende solo.
+
+1. Subir el proyecto a GitHub.
+2. En Vercel: *Add New → Project* y elegir el repositorio. **No cambies nada de
+   la configuración**: la lee del `vercel.json`.
+3. En *Environment Variables*, añadir:
+
+| Variable | Valor |
+|---|---|
+| `DATABASE_URL` | la cadena de Atlas del paso 1 |
+| `ACCESO_ABIERTO` | `true` |
+| `NODE_ENV` | `production` |
+| `TZ_NEGOCIO` | `America/Bogota` |
+| `COOKIE_SECURE` | `true` |
+| `JWT_SECRET` | cualquier texto largo (`openssl rand -base64 48`) |
+| `JWT_REFRESH_SECRET` | otro distinto |
+| `SEED_ADMIN_EMAIL` · `SEED_ADMIN_PASSWORD` · `SEED_ADMIN_NAME` | por si algún día cierras la puerta |
+
+4. **Importante en Atlas**: en *Network Access* hay que permitir `0.0.0.0/0`.
+   Las funciones de Vercel no tienen una dirección fija, así que no se puede
+   restringir por IP. La base sigue protegida por su usuario y contraseña.
+
+#### Qué cambia por ser serverless
+
+Vercel no deja un servidor encendido: despierta la aplicación cuando llega una
+petición y la vuelve a dormir. Para este negocio eso significa:
+
+- **Sale gratis** en el plan Hobby.
+- **La primera petición tras un rato sin uso tarda uno o dos segundos.** Después
+  va a velocidad normal mientras se siga usando.
+- La conexión a la base se reutiliza entre peticiones y la preparación inicial
+  se hace una sola vez por instancia, para que ese despertar sea lo más corto
+  posible.
+
+Si algún día molesta esa espera, pasar a la opción B es cambiar de proveedor sin
+tocar el código.
+
+### Opción B — Render (sin esperas, ~7 US$/mes)
 
 El repositorio trae `render.yaml`, así que Render lo configura solo.
 
@@ -97,7 +135,7 @@ El repositorio trae `render.yaml`, así que Render lo configura solo.
 minutos y despierta en unos 30 segundos: abrirías la app frente a un cliente y
 esperarías medio minuto.
 
-### Opción B — Cualquier servidor con Docker
+### Opción C — Cualquier servidor con Docker
 
 ```bash
 docker build -t geovanny .
@@ -152,7 +190,7 @@ RATES_VES_DEFAULT_MARKET=PARALELO
 |---|---|
 | **Copias de seguridad** | Lo más importante de todo. Atlas las hace automáticas desde M10; en M0 conviene un `mongodump` semanal guardado fuera del proveedor. Una copia que no se ha probado restaurando no es una copia |
 | **Vigilancia** | `https://TU-DIRECCION/api/health` con un servicio gratuito tipo UptimeRobot: avisa si se cae |
-| **Actualizar** | Subir los cambios a GitHub; Render vuelve a desplegar solo. Con Docker, reconstruir la imagen |
+| **Actualizar** | Subir los cambios a GitHub; Vercel y Render vuelven a desplegar solos. Con Docker, reconstruir la imagen |
 | **Secretos** | Solo en las variables del proveedor. Nunca en el repositorio |
 | **Hora** | Todo se guarda en UTC y se muestra en la hora del negocio (`TZ_NEGOCIO`) |
 
@@ -160,17 +198,20 @@ RATES_VES_DEFAULT_MARKET=PARALELO
 
 ## Por qué esta arquitectura y no otra
 
-| | **Render + Atlas** | **VPS con Docker** | **Serverless** |
+| | **Vercel + Atlas** | **Render + Atlas** | **VPS con Docker** |
 |---|---|---|---|
-| Costo al mes | ~7 US$ + base gratis | ~6–12 US$ todo | 0–20 US$, impredecible |
-| Arranque en frío | Ninguno en plan pago | Ninguno | Sí, en cada función ❌ |
-| Transacciones de MongoDB | ✅ | ✅ | ⚠️ el pool de conexiones sufre |
-| Copias de seguridad | Incluidas desde M10 | Tuyas ❌ | Incluidas |
-| Mantenimiento | Casi nulo | Actualizaciones, TLS, seguridad ❌ | Casi nulo |
+| Costo al mes | **Gratis** | ~7 US$ + base gratis | ~6–12 US$ todo |
+| Arranque en frío | 1–2 s tras inactividad | Ninguno en plan pago | Ninguno |
+| Transacciones de MongoDB | ✅ | ✅ | ✅ |
+| Copias de seguridad | De Atlas | De Atlas | Tuyas ❌ |
+| Mantenimiento | Casi nulo | Casi nulo | Actualizaciones, TLS, seguridad ❌ |
+| Cambiar a otra | Sin tocar código | Sin tocar código | Sin tocar código |
 
-**Serverless queda descartado**: transacciones de MongoDB y arranques en frío
-son justo lo que rompe el objetivo de que una venta se guarde en menos de medio
-segundo.
+**Sobre serverless (Vercel):** el análisis inicial lo descartaba por los
+arranques en frío. Con un negocio de un solo usuario la cuenta cambia: sale
+gratis y la espera son uno o dos segundos, solo tras un rato sin usarla. Las
+transacciones de MongoDB funcionan igual contra Atlas. Es un intercambio
+razonable; si la espera molesta, se cambia a Render sin tocar código.
 
 La latencia importa menos por dónde estés tú que por **dónde está la base
 respecto al servidor**: una venta hace ocho o diez idas y vueltas a MongoDB. Por

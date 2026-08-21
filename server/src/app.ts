@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -84,7 +85,11 @@ export function createApp() {
 
   app.use(env.API_PREFIX, apiRouter);
 
-  if (isProduction) {
+  // En Vercel los archivos de la aplicación los sirve la propia plataforma y no
+  // viajan dentro de la función, así que puede no haber nada que servir aquí.
+  const sirveLaAplicacion = isProduction && fs.existsSync(CARPETA_CLIENTE);
+
+  if (sirveLaAplicacion) {
     // Los archivos con huella (index-a1b2c3.js) se pueden cachear para siempre;
     // el index.html no, porque es el que apunta a las versiones nuevas.
     app.use(express.static(CARPETA_CLIENTE, { maxAge: '1y', index: false }));

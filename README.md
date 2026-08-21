@@ -115,8 +115,8 @@ en bolívares, son dos cuentas distintas, como en el cuaderno.
 
 ## Publicarlo en internet
 
-Todo el despliegue está preparado: `Dockerfile` y `render.yaml` en la raíz, y el
-paso a paso en **[DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+Todo el despliegue está preparado: `vercel.json`, `render.yaml` y `Dockerfile`
+en la raíz, y el paso a paso en **[DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
 Se publica **una sola cosa**: el mismo servidor entrega la aplicación y la API,
 así que hay una sola dirección y un solo despliegue. La base de datos va en

@@ -10,6 +10,11 @@ import { logger } from './logger.js';
  * contra un `mongod` suelto. Ver DEPLOYMENT.md §1.
  */
 export async function connectDatabase(): Promise<typeof mongoose> {
+  // Si ya hay conexión, se reutiliza. En un servidor normal esto no pasa nunca;
+  // en serverless la instancia se reaprovecha entre peticiones y volver a
+  // conectar agotaría el límite de conexiones de la base.
+  if (mongoose.connection.readyState === 1) return mongoose;
+
   mongoose.set('strictQuery', true);
   // Nunca devolver un objeto Decimal128 crudo a la capa de dominio.
   mongoose.set('toJSON', { virtuals: true });
