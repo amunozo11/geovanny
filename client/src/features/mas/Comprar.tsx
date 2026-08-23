@@ -5,6 +5,7 @@ import { D, MONEDAS, conUnidad, formatMoney, money, type Moneda } from '@geovann
 import type { ApiError} from '../../lib/api';
 import { api } from '../../lib/api';
 import { Aviso, Boton, Campo, Tarjeta } from '../../components/ui/base';
+import { CampoDinero } from '../../components/ui/CampoDinero';
 import { BuscadorPersona } from '../clientes/BuscadorPersona';
 import { CampoFecha, comoInstante, hoy } from '../../components/ui/CampoFecha';
 import type { Persona, Producto } from '../../lib/tipos';
@@ -130,7 +131,7 @@ export function Comprar() {
                 numerico
                 autoFocus
               />
-              <Campo etiqueta="Precio de compra" valor={precio} onChange={setPrecio} numerico />
+              <CampoDinero etiqueta="Precio de compra" valor={precio} onChange={setPrecio} />
             </div>
             <div className="flex gap-2">
               <Boton variante="secundario" onClick={() => setElegido(null)} className="flex-1">
@@ -169,7 +170,7 @@ export function Comprar() {
       )}
 
       <Tarjeta titulo="Cargue y transporte">
-        <Campo valor={cargue} onChange={setCargue} numerico placeholder="0" />
+        <CampoDinero valor={cargue} onChange={setCargue} placeholder="0" />
         <p className="mt-2 text-xs opacity-60">
           Se reparte entre los productos según lo que valga cada uno, para saber el costo real por
           bulto.

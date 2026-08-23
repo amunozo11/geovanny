@@ -5,6 +5,7 @@ import { D, MONEDAS, conUnidad, formatMoney, money, type Moneda } from '@geovann
 import type { ApiError} from '../../lib/api';
 import { api } from '../../lib/api';
 import { Aviso, Boton, Campo, Tarjeta } from '../../components/ui/base';
+import { CampoDinero } from '../../components/ui/CampoDinero';
 import { BuscadorPersona } from '../clientes/BuscadorPersona';
 import { CampoFecha, comoInstante, hoy } from '../../components/ui/CampoFecha';
 import type { Persona, Producto } from '../../lib/tipos';
@@ -168,7 +169,7 @@ export function Vender() {
                 numerico
                 autoFocus
               />
-              <Campo etiqueta="Precio por unidad" valor={precio} onChange={setPrecio} numerico />
+              <CampoDinero etiqueta="Precio por unidad" valor={precio} onChange={setPrecio} />
             </div>
             {cantidad && precio && (
               <p className="tabular text-sm opacity-70">

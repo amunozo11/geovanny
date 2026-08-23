@@ -7,6 +7,7 @@ import { api } from '../../lib/api';
 import { useMoneda } from '../moneda/contexto';
 import { SelectorCaja } from '../cajas/SelectorCaja';
 import { Aviso, Boton, Campo, Cargando, Seleccion, Tarjeta, Vacio } from '../../components/ui/base';
+import { CampoDinero } from '../../components/ui/CampoDinero';
 import { useAuth } from '../auth/AuthContext';
 import type { Cargo, Operacion, Pago, Persona } from '../../lib/tipos';
 
@@ -289,7 +290,7 @@ function FormularioAbono({
         />
 
         <div className="grid grid-cols-2 gap-3">
-          <Campo etiqueta="¿Cuánto abona?" valor={monto} onChange={setMonto} numerico autoFocus />
+          <CampoDinero etiqueta="¿Cuánto abona?" valor={monto} onChange={setMonto} autoFocus />
           <Seleccion
             etiqueta="¿En qué paga?"
             valor={moneda}
@@ -435,7 +436,7 @@ function FormularioCargo({
         />
 
         <div className="grid grid-cols-2 gap-3">
-          <Campo etiqueta="Cuánto" valor={monto} onChange={setMonto} numerico />
+          <CampoDinero etiqueta="Cuánto" valor={monto} onChange={setMonto} />
           <Seleccion
             etiqueta="Moneda"
             valor={moneda}

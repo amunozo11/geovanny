@@ -6,6 +6,7 @@ import type { ApiError} from '../../lib/api';
 import { api } from '../../lib/api';
 import { Plata } from '../../components/ui/Plata';
 import { Aviso, Boton, Campo, Cargando, Seleccion, Tarjeta, Vacio } from '../../components/ui/base';
+import { CampoDinero } from '../../components/ui/CampoDinero';
 import type { Gasto } from '../../lib/tipos';
 import { SelectorCaja } from '../cajas/SelectorCaja';
 import { CampoFecha, comoInstante, hoy } from '../../components/ui/CampoFecha';
@@ -79,7 +80,7 @@ export function Gastos() {
             }))}
           />
           <div className="grid grid-cols-2 gap-3">
-            <Campo etiqueta="Monto" valor={monto} onChange={setMonto} numerico />
+            <CampoDinero etiqueta="Monto" valor={monto} onChange={setMonto} />
             <Seleccion
               etiqueta="Moneda"
               valor={moneda}

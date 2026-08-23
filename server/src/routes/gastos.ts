@@ -29,6 +29,34 @@ gastosRouter.get('/', async (req, res) => {
   res.json({ data: gastos });
 });
 
+/**
+ * Los nombres que ya se han usado, del más repetido al menos.
+ *
+ * En la práctica los gastos del día son siempre los mismos: luisma, jose, el
+ * carro, la caleta. Volver a teclearlos cada vez —y escribirlos distinto cada
+ * vez, que es lo que rompe cualquier reporte— no tiene sentido pudiendo
+ * ofrecerlos ya escritos.
+ */
+gastosRouter.get('/nombres', async (_req, res) => {
+  const filas = await GastoModel.aggregate<{ _id: string; nombre: string; veces: number }>([
+    { $match: { estado: 'ACTIVO', descripcion: { $nin: ['', null] } } },
+    {
+      $group: {
+        // Se agrupa sin distinguir mayúsculas para que "Luisma" y "LUISMA" no
+        // salgan como dos gastos distintos.
+        _id: { $toUpper: '$descripcion' },
+        nombre: { $first: '$descripcion' },
+        veces: { $sum: 1 },
+        ultima: { $max: '$fecha' },
+      },
+    },
+    { $sort: { veces: -1, ultima: -1 } },
+    { $limit: 40 },
+  ]);
+
+  res.json({ data: filas.map((f) => ({ nombre: f.nombre, veces: f.veces })) });
+});
+
 gastosRouter.post('/', requirePermission('expense:write'), async (req, res) => {
   const entrada = gastoSchema.parse(req.body);
   const tasa = await tasaVigente();

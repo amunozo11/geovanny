@@ -15,6 +15,7 @@ import {
 import type { ApiError } from '../../lib/api';
 import { api } from '../../lib/api';
 import { Aviso, Boton, Campo, Cargando, Tarjeta, Vacio } from '../../components/ui/base';
+import { CampoDinero } from '../../components/ui/CampoDinero';
 import { CampoFecha, TiraDeDias, comoInstante, etiquetaDia, hoy } from '../../components/ui/CampoFecha';
 import { SelectorCaja } from '../cajas/SelectorCaja';
 import { useAuth } from '../auth/AuthContext';
@@ -741,11 +742,10 @@ function RenglonVenta({
           numerico
           autoFocus={esNueva}
         />
-        <Campo
+        <CampoDinero
           etiqueta={`Precio por ${linea.unidad.toLowerCase()}`}
           valor={linea.precio}
           onChange={(v) => onCambiar({ precio: v })}
-          numerico
         />
       </div>
 

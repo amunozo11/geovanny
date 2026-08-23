@@ -6,6 +6,7 @@ import type { ApiError } from '../../lib/api';
 import { api } from '../../lib/api';
 import { useMoneda } from '../moneda/contexto';
 import { Aviso, Boton, Campo, Cargando, Seleccion, Tarjeta, Vacio } from '../../components/ui/base';
+import { CampoDinero } from '../../components/ui/CampoDinero';
 import type { Caja, MovimientoCaja } from '../../lib/tipos';
 
 /**
@@ -186,11 +187,10 @@ function FormularioConteo({
 
   return (
     <div className="mt-3 space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
-      <Campo
+      <CampoDinero
         etiqueta="¿Cuánto hay realmente?"
         valor={saldoReal}
         onChange={setSaldoReal}
-        numerico
         autoFocus
       />
       {diferencia && !diferencia.isZero() && (
@@ -266,11 +266,10 @@ function FormularioTraslado({
       <div className="space-y-3">
         <Seleccion etiqueta="De" valor={origenId} onChange={setOrigenId} opciones={opciones} />
         <Seleccion etiqueta="A" valor={destinoId} onChange={setDestinoId} opciones={opciones} />
-        <Campo
+        <CampoDinero
           etiqueta={`Cuánto sale${origen ? ` (${origen.moneda})` : ''}`}
           valor={monto}
           onChange={setMonto}
-          numerico
         />
 
         {esCambio && (
@@ -279,11 +278,10 @@ function FormularioTraslado({
               Estás cambiando {origen!.moneda} por {destino!.moneda}. Si lo dejas vacío se usa la
               tasa del día; si escribes cuánto recibiste, se guarda la tasa real de ese cambio.
             </Aviso>
-            <Campo
+            <CampoDinero
               etiqueta={`Cuánto recibes en ${destino!.moneda} (opcional)`}
               valor={montoDestino}
               onChange={setMontoDestino}
-              numerico
             />
           </>
         )}
@@ -359,11 +357,10 @@ function FormularioNuevaCaja({
             ]}
           />
         </div>
-        <Campo
+        <CampoDinero
           etiqueta="¿Cuánto hay ahora? (opcional)"
           valor={saldoInicial}
           onChange={setSaldoInicial}
-          numerico
         />
         {error && <Aviso tono="error">{error}</Aviso>}
         <div className="flex gap-2">

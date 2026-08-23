@@ -5,6 +5,7 @@ import { D, MONEDAS, conUnidad, formatMoney, money, plural, type Moneda } from '
 import type { ApiError } from '../../lib/api';
 import { api } from '../../lib/api';
 import { Aviso, Boton, Campo, Cargando, Seleccion, Tarjeta, Vacio } from '../../components/ui/base';
+import { CampoDinero } from '../../components/ui/CampoDinero';
 import { useAuth } from '../auth/AuthContext';
 import type { Producto } from '../../lib/tipos';
 
@@ -288,11 +289,10 @@ function FormularioProducto({
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Campo
+        <CampoDinero
           etiqueta="Precio de venta (opcional)"
           valor={precioVenta}
           onChange={setPrecioVenta}
-          numerico
         />
         <Campo
           etiqueta="Avisar cuando queden"
@@ -314,11 +314,10 @@ function FormularioProducto({
               numerico
               placeholder="0"
             />
-            <Campo
+            <CampoDinero
               etiqueta="Costo por unidad"
               valor={costoUnitario}
               onChange={setCostoUnitario}
-              numerico
               placeholder="0"
             />
           </div>

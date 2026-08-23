@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { D, MONEDAS, conUnidad, formatMoney, money, type Moneda } from '@geovanny/shared';
 import type { ApiError } from '../../lib/api';
 import { api } from '../../lib/api';
-import { Aviso, Boton, Campo, Cargando, Seleccion, Tarjeta, Vacio } from '../../components/ui/base';
+import { Aviso, Boton, Campo, Cargando, Tarjeta, Vacio } from '../../components/ui/base';
+import { CampoDinero } from '../../components/ui/CampoDinero';
 import { TiraDeDias, comoInstante, etiquetaDia, hoy } from '../../components/ui/CampoFecha';
 import { useAuth } from '../auth/AuthContext';
 import type { InformeTodo, PorMoneda } from '../../lib/tipos';
@@ -21,18 +22,6 @@ import type { InformeTodo, PorMoneda } from '../../lib/tipos';
  */
 
 const NOMBRE: Record<Moneda, string> = { COP: 'Pesos', USD: 'Dólares', VES: 'Bolívares' };
-
-const CATEGORIAS = [
-  'TRANSPORTE',
-  'CARGUE',
-  'COMBUSTIBLE',
-  'ALIMENTACION',
-  'COMISIONES',
-  'ARRIENDO',
-  'SERVICIOS',
-  'NOMINA',
-  'OTROS',
-];
 
 /** Las monedas que aparecen en alguna de estas bolsas. Ninguna en cero de adorno. */
 function monedasCon(...bolsas: (PorMoneda | undefined)[]): Moneda[] {
@@ -288,36 +277,69 @@ export function Todo() {
 /**
  * Un gasto más, escrito aquí mismo.
  *
- * Va al mismo sitio que los gastos de siempre (`/api/gastos`), así que sale en
- * el resumen del mes y descuenta de la caja. Un segundo sitio donde guardar
- * gastos habría partido el reporte en dos.
+ * Los gastos del día son siempre los mismos —luisma, jose, el carro, la
+ * caleta—, así que la pantalla los ofrece ya escritos y basta con tocarlos.
+ * Eso no es solo comodidad: teclearlos a mano cada vez es lo que produce
+ * "Luisma", "luisma " y "Luizma" como tres gastos distintos, y ahí se acabó
+ * cualquier reporte de en qué se va la plata.
+ *
+ * Un nombre que no está en la lista se puede crear, pero hay que confirmarlo:
+ * así una errata de dedo no nace como categoría nueva sin que nadie la vea.
+ *
+ * Va al mismo sitio que los gastos de siempre (`/api/gastos`), con categoría
+ * OTROS. Un segundo sitio donde guardar gastos habría partido el reporte del
+ * mes en dos.
  */
 function NuevoGasto({ dia, onListo }: { dia: string; onListo: () => void }) {
+  const clienteDeQuery = useQueryClient();
   const [abierto, setAbierto] = useState(false);
-  const [motivo, setMotivo] = useState('');
+  const [nombre, setNombre] = useState('');
+  const [nuevoAceptado, setNuevoAceptado] = useState<string | null>(null);
   const [monto, setMonto] = useState('');
   const [moneda, setMoneda] = useState<Moneda>('VES');
-  const [categoria, setCategoria] = useState('OTROS');
   const [error, setError] = useState<string | null>(null);
+
+  const conocidos = useQuery({
+    queryKey: ['gastos', 'nombres'],
+    queryFn: () => api<{ nombre: string; veces: number }[]>('/gastos/nombres'),
+    enabled: abierto,
+  });
+
+  const lista = conocidos.data ?? [];
+  const escrito = nombre.trim();
+  const igual = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+  const sugerencias = escrito
+    ? lista.filter((n) => n.nombre.toLowerCase().includes(escrito.toLowerCase()))
+    : lista;
+
+  const yaExiste = lista.some((n) => igual(n.nombre, escrito));
+  const esNuevoSinConfirmar =
+    escrito !== '' && !yaExiste && !(nuevoAceptado && igual(nuevoAceptado, escrito));
 
   const guardar = useMutation({
     mutationFn: () =>
       api('/gastos', {
         method: 'POST',
         body: JSON.stringify({
-          categoria,
-          descripcion: motivo.trim(),
+          // Los gastos que se anotan aquí son gente y cosas del día, no una
+          // categoría contable: van todos a OTROS y el nombre es lo que importa.
+          categoria: 'OTROS',
+          descripcion: escrito,
           monto,
           moneda,
           fecha: dia === hoy() ? undefined : comoInstante(dia),
         }),
       }),
     onSuccess: () => {
-      setMotivo('');
+      setNombre('');
+      setNuevoAceptado(null);
       setMonto('');
       setError(null);
+      // El nombre nuevo pasa a estar disponible para el siguiente.
+      void clienteDeQuery.invalidateQueries({ queryKey: ['gastos', 'nombres'] });
       onListo();
-      // Se queda abierto: lo normal es anotar varios seguidos.
+      // El formulario se queda abierto: lo normal es anotar varios seguidos.
     },
     onError: (e: ApiError) => setError(e.message),
   });
@@ -334,20 +356,54 @@ function NuevoGasto({ dia, onListo }: { dia: string; onListo: () => void }) {
     <div className="mt-3 space-y-3 rounded-lg border border-dashed border-slate-300 p-3 dark:border-slate-700">
       <Campo
         etiqueta="¿En qué se gastó?"
-        valor={motivo}
-        onChange={setMotivo}
-        placeholder="Gasolina, almuerzo, peaje…"
+        valor={nombre}
+        onChange={(v) => {
+          setNombre(v);
+          setError(null);
+        }}
+        placeholder="Luisma, el carro, la caleta…"
         autoFocus
       />
-      <div className="grid grid-cols-2 gap-3">
-        <Campo etiqueta="Cuánto" valor={monto} onChange={setMonto} numerico />
-        <Seleccion
-          etiqueta="Categoría"
-          valor={categoria}
-          onChange={setCategoria}
-          opciones={CATEGORIAS.map((c) => ({ valor: c, texto: c.toLowerCase() }))}
-        />
-      </div>
+
+      {sugerencias.length > 0 && (
+        <div className="-mx-1 flex flex-wrap gap-2 px-1">
+          {sugerencias.slice(0, 12).map((sugerencia) => (
+            <button
+              key={sugerencia.nombre}
+              type="button"
+              onClick={() => {
+                setNombre(sugerencia.nombre);
+                setNuevoAceptado(null);
+              }}
+              className={[
+                'min-h-[36px] rounded-full border px-3 text-sm',
+                igual(sugerencia.nombre, escrito)
+                  ? 'border-brand-600 bg-brand-600 font-semibold text-white'
+                  : 'border-slate-300 dark:border-slate-700',
+              ].join(' ')}
+            >
+              {sugerencia.nombre}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {esNuevoSinConfirmar && (
+        <Aviso tono="atencion">
+          <p>
+            «{escrito}» no está en la lista. ¿Lo creas como gasto nuevo?
+          </p>
+          <Boton
+            variante="secundario"
+            onClick={() => setNuevoAceptado(escrito)}
+            className="mt-2 w-full text-sm"
+          >
+            Sí, crear «{escrito}»
+          </Boton>
+        </Aviso>
+      )}
+
+      <CampoDinero etiqueta="Cuánto" valor={monto} onChange={setMonto} />
 
       <div className="grid grid-cols-3 gap-2">
         {MONEDAS.map((codigo) => (
@@ -376,7 +432,7 @@ function NuevoGasto({ dia, onListo }: { dia: string; onListo: () => void }) {
         </Boton>
         <Boton
           onClick={() => guardar.mutate()}
-          disabled={!motivo.trim() || !monto || guardar.isPending}
+          disabled={!escrito || !monto || esNuevoSinConfirmar || guardar.isPending}
           className="flex-1"
         >
           {guardar.isPending ? 'Guardando…' : 'Anotar gasto'}
@@ -442,7 +498,7 @@ function FormularioCierre({
     D(sobrante[m] || '0').minus(D(informe.deberiaQuedar[m]));
 
   return (
-    <Tarjeta titulo="Cierre del día">
+    <Tarjeta titulo="Wilmer me queda debiendo hoy">
       <p className="mb-3 text-xs opacity-60">
         Cuenta el dinero y escribe lo que hay de verdad. Ese sobrante es con lo que arrancas
         mañana.
@@ -455,11 +511,10 @@ function FormularioCierre({
 
           return (
             <div key={m}>
-              <Campo
+              <CampoDinero
                 etiqueta={`${NOMBRE[m]} contados`}
                 valor={sobrante[m] ?? ''}
                 onChange={(v) => setSobrante((previo) => ({ ...previo, [m]: v }))}
-                numerico
                 placeholder={informe.deberiaQuedar[m]}
               />
               {escrito && !dif.isZero() && (

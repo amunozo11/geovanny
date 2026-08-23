@@ -4,6 +4,16 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',
+    /**
+     * Dos ficheros a la vez como mucho.
+     *
+     * Cada fichero de prueba levanta un `mongod` real en replica set —hace
+     * falta para las transacciones— y arrancar ocho a la vez pone la máquina de
+     * rodillas: los tests empiezan a fallar por tiempo de espera, no porque el
+     * código esté mal. Un fallo intermitente que no significa nada es peor que
+     * ninguna prueba, porque enseña a ignorar los rojos.
+     */
+    poolOptions: { threads: { maxThreads: 2 } },
     // Entorno de prueba autocontenido: los tests no deben depender de un .env
     // local ni de una base de datos levantada.
     env: {
