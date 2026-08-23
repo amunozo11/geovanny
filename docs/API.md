@@ -174,6 +174,10 @@ Si la tercera falla por falta de existencias, las dos primeras siguen guardadas:
 deshacerlas todas obligaría a volver a teclearlas, que es justo lo que este
 módulo viene a evitar.
 
+**La moneda es de cada línea, no de la tanda.** En el mostrador una venta se
+cobra en bolívares y la siguiente en dólares; `POST /lote` acepta líneas con
+monedas distintas y cada una cae en la caja de la suya.
+
 `forzar: true` registra aunque no haya existencias, igual que `?forzar=true` en
 las ventas normales (RP-14).
 

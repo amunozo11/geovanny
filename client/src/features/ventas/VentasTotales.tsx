@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -15,7 +15,7 @@ import {
 import type { ApiError } from '../../lib/api';
 import { api } from '../../lib/api';
 import { Aviso, Boton, Campo, Cargando, Tarjeta, Vacio } from '../../components/ui/base';
-import { CampoFecha, comoInstante, hoy } from '../../components/ui/CampoFecha';
+import { CampoFecha, TiraDeDias, comoInstante, etiquetaDia, hoy } from '../../components/ui/CampoFecha';
 import { SelectorCaja } from '../cajas/SelectorCaja';
 import { useAuth } from '../auth/AuthContext';
 import type { CorteVentasTotales, Producto, ResultadoLote } from '../../lib/tipos';
@@ -25,8 +25,18 @@ import type { CorteVentasTotales, Producto, ResultadoLote } from '../../lib/tipo
  *
  * La pantalla está hecha para el ritmo real de un día de venta: arriba lo que
  * hay, se toca un producto y abajo aparece su renglón listo para escribir
- * cantidad y precio. Se puede guardar renglón por renglón —según se va
- * despachando— o todos de golpe al final. Nunca se sale de esta pantalla.
+ * cantidad, precio y en qué moneda se cobró. Se puede guardar renglón por
+ * renglón —según se va despachando— o todos de golpe al final, sin salir de
+ * aquí.
+ *
+ * Los renglones se agrupan por producto, bajo su encabezado: vender papa cinco
+ * veces en la mañana es lo normal, y obligar a subir a la cuadrícula y volver a
+ * bajar cada vez sería el peor camino posible. Dentro de cada grupo hay un
+ * "añadir otra" que deja el siguiente renglón justo debajo.
+ *
+ * La moneda es **de cada registro, no de la tanda**: en el mostrador una venta
+ * se cobra en bolívares y la siguiente en dólares, y no se va a cambiar un
+ * selector global entre una y otra.
  */
 
 interface Linea {
@@ -37,6 +47,7 @@ interface Linea {
   stock: string;
   cantidad: string;
   precio: string;
+  moneda: Moneda;
   estado: 'PENDIENTE' | 'GUARDANDO' | 'GUARDADA' | 'ERROR';
   numero?: string;
   error?: string;
@@ -45,31 +56,53 @@ interface Linea {
   forzar?: boolean;
 }
 
-const nuevaLinea = (clave: number, producto: Producto): Linea => ({
-  clave,
-  productoId: producto.id,
-  nombre: producto.nombre,
-  unidad: producto.unidad,
-  stock: producto.stock,
-  cantidad: '',
-  // Se propone el precio habitual del producto; siempre se puede cambiar.
-  precio: producto.precioVenta !== '0' ? producto.precioVenta : '',
-  estado: 'PENDIENTE',
-});
+interface Grupo {
+  productoId: string;
+  nombre: string;
+  unidad: string;
+  stock: string;
+  lineas: Linea[];
+}
+
+const enCero = (): Record<Moneda, string> =>
+  Object.fromEntries(MONEDAS.map((m) => [m, '0'])) as Record<Moneda, string>;
+
+const subtotalDe = (linea: Linea): string =>
+  D(linea.cantidad || '0')
+    .times(D(linea.precio || '0'))
+    .toString();
+
+/** Suma un conjunto de renglones dejando cada moneda en su propia casilla. */
+function porMoneda(lineas: Linea[]): Record<Moneda, string> {
+  const total = enCero();
+  for (const linea of lineas) {
+    total[linea.moneda] = D(total[linea.moneda]).plus(D(subtotalDe(linea))).toString();
+  }
+  return total;
+}
+
+/** "US$ 20,00 · Bs. 4.000,00" — solo las monedas que tienen algo. */
+function comoTexto(total: Record<Moneda, string>): string {
+  const conAlgo = MONEDAS.filter((m) => !D(total[m]).isZero());
+  if (conAlgo.length === 0) return '—';
+  return conAlgo.map((m) => formatMoney(money(total[m], m))).join(' · ');
+}
 
 export function VentasTotales() {
   const clienteDeQuery = useQueryClient();
   const { puede } = useAuth();
 
   const [dia, setDia] = useState(hoy());
-  const [moneda, setMoneda] = useState<Moneda>('VES');
-  const [cajaId, setCajaId] = useState('');
+  /** Moneda que se propone en el renglón siguiente: la última que se usó. */
+  const [ultimaMoneda, setUltimaMoneda] = useState<Moneda>('VES');
+  const [cajaPorMoneda, setCajaPorMoneda] = useState<Partial<Record<Moneda, string>>>({});
   const [lineas, setLineas] = useState<Linea[]>([]);
   const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
+  /** El último renglón añadido: se enfoca y se trae a la vista. */
+  const [recienAgregada, setRecienAgregada] = useState<number | null>(null);
 
   const siguienteClave = useRef(1);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const ultimaRef = useRef<HTMLLIElement | null>(null);
+  const refRecien = useRef<HTMLLIElement | null>(null);
 
   const productos = useQuery({
     queryKey: ['productos', ''],
@@ -88,52 +121,113 @@ export function VentasTotales() {
     queryFn: () => api<{ vigente: TasaDelDia | null }>('/tasas'),
   });
 
+  // `nearest` mueve lo mínimo imprescindible: si el renglón nuevo apareció
+  // justo debajo del dedo, la pantalla casi no se mueve; si estaba fuera de
+  // vista, baja solo lo justo para enseñarlo.
+  useEffect(() => {
+    if (recienAgregada === null) return;
+    refRecien.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [recienAgregada]);
+
   const pendientes = lineas.filter((l) => l.estado !== 'GUARDADA');
   const listasParaGuardar = pendientes.filter(
     (l) => D(l.cantidad || '0').greaterThan(0) && D(l.precio || '0').greaterThan(0),
   );
 
-  const totalPendiente = useMemo(
-    () =>
-      listasParaGuardar
-        .reduce((acc, l) => acc.plus(D(l.cantidad).times(D(l.precio))), D(0))
-        .toString(),
-    [listasParaGuardar],
-  );
+  /** Un bloque por producto, en el orden en que se fueron tocando. */
+  const grupos = useMemo(() => {
+    const agrupado = new Map<string, Grupo>();
+    for (const linea of lineas) {
+      const grupo = agrupado.get(linea.productoId);
+      if (grupo) grupo.lineas.push(linea);
+      else
+        agrupado.set(linea.productoId, {
+          productoId: linea.productoId,
+          nombre: linea.nombre,
+          unidad: linea.unidad,
+          stock: linea.stock,
+          lineas: [linea],
+        });
+    }
+    return [...agrupado.values()];
+  }, [lineas]);
 
+  const totalPendiente = useMemo(() => porMoneda(pendientes), [pendientes]);
+
+  /** Lo pendiente, convertido a las tres monedas con la tasa de hoy. */
   const equivalentePendiente = useMemo(() => {
     const vigente = tasa.data?.vigente;
-    if (!vigente || D(totalPendiente).isZero()) return null;
-    return crearImporte(totalPendiente, moneda, vigente).eq;
-  }, [tasa.data, totalPendiente, moneda]);
+    if (!vigente) return null;
 
-  function agregar(producto: Producto) {
+    const acumulado = enCero();
+    for (const linea of listasParaGuardar) {
+      const importe = crearImporte(subtotalDe(linea), linea.moneda, vigente);
+      for (const m of MONEDAS) {
+        acumulado[m] = D(acumulado[m]).plus(D(importe.eq[m])).toString();
+      }
+    }
+    return acumulado;
+  }, [tasa.data, listasParaGuardar]);
+
+  /** Las monedas que hay ahora mismo sobre la mesa, para pedir su caja. */
+  const monedasEnUso = MONEDAS.filter((m) => pendientes.some((l) => l.moneda === m));
+
+  /**
+   * Añade un renglón de un producto.
+   *
+   * Si ya hay renglones de ese producto se heredan precio y moneda del último:
+   * quien despacha papa cinco veces la vende casi siempre igual, y volver a
+   * teclearlo cada vez es trabajo regalado.
+   */
+  function agregar(producto: {
+    id: string;
+    nombre: string;
+    unidad: string;
+    stock: string;
+    precioVenta?: string;
+    monedaVenta?: Moneda;
+  }) {
     const clave = siguienteClave.current++;
-    setLineas((previas) => [...previas, nuevaLinea(clave, producto)]);
-    setErrorGeneral(null);
-    // "Toco el producto y me lleva abajo a llenarlo": el desplazamiento ocurre
-    // tras pintar el renglón nuevo, por eso el salto al siguiente ciclo.
-    requestAnimationFrame(() => {
-      (ultimaRef.current ?? panelRef.current)?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      });
+    setLineas((previas) => {
+      const ultimaDelMismo = [...previas].reverse().find((l) => l.productoId === producto.id);
+      return [
+        ...previas,
+        {
+          clave,
+          productoId: producto.id,
+          nombre: producto.nombre,
+          unidad: producto.unidad,
+          stock: producto.stock,
+          cantidad: '',
+          precio:
+            ultimaDelMismo?.precio ??
+            (producto.precioVenta && producto.precioVenta !== '0' ? producto.precioVenta : ''),
+          moneda: ultimaDelMismo?.moneda ?? producto.monedaVenta ?? ultimaMoneda,
+          estado: 'PENDIENTE',
+        },
+      ];
     });
+    setRecienAgregada(clave);
+    setErrorGeneral(null);
   }
 
-  const cambiar = (clave: number, cambios: Partial<Linea>) =>
+  const cambiar = (clave: number, cambios: Partial<Linea>) => {
+    if (cambios.moneda) setUltimaMoneda(cambios.moneda);
     setLineas((previas) =>
       previas.map((l) =>
-        l.clave === clave ? { ...l, ...cambios, ...(cambios.estado ? {} : { error: undefined }) } : l,
+        l.clave === clave
+          ? { ...l, ...cambios, ...(cambios.estado ? {} : { error: undefined }) }
+          : l,
       ),
     );
+  };
 
   const cuerpoDe = (linea: Linea) => ({
     productoId: linea.productoId,
     cantidad: linea.cantidad,
     precio: linea.precio,
-    moneda,
-    cajaId: cajaId || null,
+    moneda: linea.moneda,
+    cajaId: cajaPorMoneda[linea.moneda] || null,
     fecha: dia === hoy() ? undefined : comoInstante(dia),
     forzar: linea.forzar === true,
   });
@@ -222,6 +316,7 @@ export function VentasTotales() {
 
   const catalogo = productos.data ?? [];
   const guardando = guardarTodas.isPending || guardarUna.isPending;
+  const esHoy = dia === hoy();
 
   return (
     <div className="space-y-4">
@@ -232,9 +327,7 @@ export function VentasTotales() {
         </p>
       </div>
 
-      <div className="flex items-center justify-between gap-3">
-        <CampoFecha valor={dia} onChange={setDia} etiqueta="¿De qué día son estas ventas?" />
-      </div>
+      <CampoFecha valor={dia} onChange={setDia} etiqueta="¿De qué día son estas ventas?" />
 
       {catalogo.length === 0 ? (
         <Vacio
@@ -283,107 +376,93 @@ export function VentasTotales() {
         </Tarjeta>
       )}
 
-      <div ref={panelRef} className="scroll-mt-24">
-        {lineas.length > 0 && (
-          <Tarjeta titulo={`Registros (${lineas.length})`}>
-            <div className="mb-3">
-              <p className="mb-1 text-xs font-medium opacity-70">¿En qué moneda vendiste?</p>
-              <div className="grid grid-cols-3 gap-2">
-                {MONEDAS.map((codigo) => (
-                  <button
-                    key={codigo}
-                    type="button"
-                    onClick={() => setMoneda(codigo)}
-                    className={[
-                      'min-h-[44px] rounded-lg border text-sm font-semibold',
-                      moneda === codigo
-                        ? 'border-brand-600 bg-brand-600 text-white'
-                        : 'border-slate-300 dark:border-slate-700',
-                    ].join(' ')}
-                  >
-                    {codigo}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-2">
-                <SelectorCaja moneda={moneda} valor={cajaId} onChange={setCajaId} />
-              </div>
-            </div>
+      {lineas.length > 0 && (
+        <Tarjeta titulo={`Registros (${lineas.length})`}>
+          <div className="space-y-3">
+            {grupos.map((grupo) => (
+              <GrupoProducto
+                key={grupo.productoId}
+                grupo={grupo}
+                claveNueva={recienAgregada}
+                refNueva={refRecien}
+                onAgregarOtra={() => agregar({ ...grupo, id: grupo.productoId })}
+                onCambiar={cambiar}
+                onQuitar={(clave) =>
+                  setLineas((previas) => previas.filter((l) => l.clave !== clave))
+                }
+                onGuardar={(linea) => guardarUna.mutate(linea)}
+                onForzar={(linea) => {
+                  const forzada = { ...linea, forzar: true, estado: 'PENDIENTE' as const };
+                  cambiar(linea.clave, forzada);
+                  guardarUna.mutate(forzada);
+                }}
+              />
+            ))}
+          </div>
 
-            <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-              {lineas.map((linea, indice) => (
-                <RenglonVenta
-                  key={linea.clave}
-                  ref={indice === lineas.length - 1 ? ultimaRef : undefined}
-                  linea={linea}
-                  moneda={moneda}
-                  onCambiar={(cambios) => cambiar(linea.clave, cambios)}
-                  onQuitar={() =>
-                    setLineas((previas) => previas.filter((l) => l.clave !== linea.clave))
-                  }
-                  onGuardar={() => guardarUna.mutate(linea)}
-                  onForzar={() => {
-                    const forzada = { ...linea, forzar: true, estado: 'PENDIENTE' as const };
-                    cambiar(linea.clave, forzada);
-                    guardarUna.mutate(forzada);
-                  }}
+          {/* Una caja por cada moneda que haya sobre la mesa. Si no hay cajas
+              creadas en esa moneda, el selector desaparece solo. */}
+          {monedasEnUso.length > 0 && (
+            <div className="mt-3 space-y-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+              {monedasEnUso.map((m) => (
+                <SelectorCaja
+                  key={m}
+                  moneda={m}
+                  valor={cajaPorMoneda[m] ?? ''}
+                  onChange={(caja) => setCajaPorMoneda((previo) => ({ ...previo, [m]: caja }))}
+                  etiqueta={`¿Dónde entran los ${m}?`}
                 />
               ))}
-            </ul>
+            </div>
+          )}
 
-            {errorGeneral && (
-              <div className="mt-3">
-                <Aviso tono="error">{errorGeneral}</Aviso>
-              </div>
-            )}
+          {errorGeneral && (
+            <div className="mt-3">
+              <Aviso tono="error">{errorGeneral}</Aviso>
+            </div>
+          )}
 
-            {listasParaGuardar.length > 1 && (
-              <Boton
-                onClick={() => guardarTodas.mutate()}
-                disabled={guardando}
-                className="mt-3 w-full"
-              >
-                {guardarTodas.isPending
-                  ? 'Guardando…'
-                  : `Guardar las ${listasParaGuardar.length} de una vez`}
-              </Boton>
-            )}
+          {listasParaGuardar.length > 1 && (
+            <Boton
+              onClick={() => guardarTodas.mutate()}
+              disabled={guardando}
+              className="mt-3 w-full"
+            >
+              {guardarTodas.isPending
+                ? 'Guardando…'
+                : `Guardar las ${listasParaGuardar.length} de una vez`}
+            </Boton>
+          )}
 
-            {pendientes.length === 0 && lineas.length > 0 && (
-              <Boton
-                variante="suave"
-                onClick={() => setLineas([])}
-                className="mt-3 w-full"
-              >
-                Listo, limpiar la lista
-              </Boton>
-            )}
-          </Tarjeta>
-        )}
-      </div>
+          {pendientes.length === 0 && (
+            <Boton variante="suave" onClick={() => setLineas([])} className="mt-3 w-full">
+              Listo, limpiar la lista
+            </Boton>
+          )}
+        </Tarjeta>
+      )}
 
       {/* El corte del día: es la cifra que él busca al cerrar. */}
       <div className="safe-bottom sticky bottom-20 rounded-xl border border-slate-200 bg-white p-4 shadow-lg dark:border-slate-800 dark:bg-slate-900">
         {listasParaGuardar.length > 0 && (
           <div className="mb-3 border-b border-dashed border-slate-200 pb-3 dark:border-slate-700">
-            <div className="flex items-baseline justify-between">
+            <div className="flex items-baseline justify-between gap-2">
               <span className="text-xs opacity-60">Sin guardar ({listasParaGuardar.length})</span>
-              <span className="tabular text-lg font-semibold">
-                {formatMoney(money(totalPendiente, moneda))}
+              <span className="tabular text-right text-sm font-semibold">
+                {comoTexto(totalPendiente)}
               </span>
             </div>
             {equivalentePendiente && (
-              <p className="tabular text-xs opacity-60">
-                {MONEDAS.filter((m) => m !== moneda)
-                  .map((m) => formatMoney(money(equivalentePendiente[m], m)))
-                  .join(' · ')}
+              <p className="tabular text-right text-xs opacity-60">
+                = {formatMoney(money(equivalentePendiente.USD, 'USD'))} ·{' '}
+                {formatMoney(money(equivalentePendiente.VES, 'VES'))}
               </p>
             )}
           </div>
         )}
 
         <p className="text-xs tracking-wide uppercase opacity-50">
-          {corte.data?.esHoy ? 'Vendido hoy de mostrador' : `Vendido el ${dia}`}
+          {esHoy ? 'Vendido hoy de mostrador' : `Vendido el ${etiquetaDia(dia).toLowerCase()} ${dia}`}
         </p>
 
         {corte.isLoading ? (
@@ -393,7 +472,9 @@ export function VentasTotales() {
             <div className="mt-1 grid grid-cols-2 gap-2">
               {(['USD', 'VES'] as const).map((m) => (
                 <div key={m}>
-                  <p className="text-[11px] uppercase opacity-50">{m === 'USD' ? 'Dólares' : 'Bolívares'}</p>
+                  <p className="text-[11px] uppercase opacity-50">
+                    {m === 'USD' ? 'Dólares' : 'Bolívares'}
+                  </p>
                   <p className="tabular text-xl font-bold">
                     {formatMoney(money(corte.data?.totales.porMoneda[m] ?? '0', m))}
                   </p>
@@ -409,6 +490,17 @@ export function VentasTotales() {
           </>
         )}
       </div>
+
+      {/* El negocio se lleva por días, así que el día se elige aquí abajo,
+          justo encima de lo que se está mirando, sin volver arriba. */}
+      <Tarjeta titulo="Qué día estás viendo">
+        <TiraDeDias valor={dia} onChange={setDia} />
+        <p className="mt-2 text-xs opacity-60">
+          {esHoy
+            ? 'Los registros nuevos se guardan en el día de hoy.'
+            : `Ojo: mientras esté marcado este día, los registros nuevos se guardan con fecha ${dia}.`}
+        </p>
+      </Tarjeta>
 
       {(corte.data?.porProducto.length ?? 0) > 0 && (
         <Tarjeta titulo="Cuánto salió de cada producto">
@@ -433,80 +525,167 @@ export function VentasTotales() {
         </Tarjeta>
       )}
 
-      {(corte.data?.ventas.length ?? 0) > 0 && (
-        <Tarjeta titulo="Registro por registro">
-          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-            {corte.data!.ventas.map((venta) => (
-              <li key={venta.id} className="flex items-center gap-2 py-2">
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">
-                    {venta.items.map((i) => `${i.cantidad} ${i.nombre.toLowerCase()}`).join(' · ')}
+      <Tarjeta titulo={`Registro por registro · ${etiquetaDia(dia).toLowerCase()}`}>
+        {corte.isLoading ? (
+          <Cargando />
+        ) : (corte.data?.ventas.length ?? 0) === 0 ? (
+          <Vacio mensaje={`No hay ventas de mostrador registradas el ${dia}.`} />
+        ) : (
+          <>
+            <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+              {corte.data!.ventas.map((venta) => (
+                <li key={venta.id} className="flex items-center gap-2 py-2">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">
+                      {venta.items.map((i) => `${i.cantidad} ${i.nombre.toLowerCase()}`).join(' · ')}
+                    </span>
+                    <span className="tabular text-xs opacity-50">
+                      {venta.numero} · {venta.hora}
+                    </span>
                   </span>
-                  <span className="tabular text-xs opacity-50">
-                    {venta.numero} · {venta.hora}
+                  <span className="tabular shrink-0 text-right text-sm">
+                    {formatMoney(money(venta.total.monto, venta.moneda))}
                   </span>
-                </span>
-                <span className="tabular shrink-0 text-sm">
-                  {formatMoney(money(venta.total.monto, venta.moneda))}
-                </span>
-                {puede('sale:void') && (
-                  <button
-                    type="button"
-                    aria-label={`Eliminar el registro ${venta.numero}`}
-                    onClick={() => anular.mutate(venta.id)}
-                    disabled={anular.isPending}
-                    className="px-1 text-lg opacity-40 hover:opacity-100"
-                  >
-                    ✕
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 text-xs opacity-50">
-            Eliminar un registro devuelve la mercancía al inventario y saca la plata de la caja.
-          </p>
-        </Tarjeta>
-      )}
+                  {puede('sale:void') && (
+                    <button
+                      type="button"
+                      aria-label={`Eliminar el registro ${venta.numero}`}
+                      onClick={() => anular.mutate(venta.id)}
+                      disabled={anular.isPending}
+                      className="px-1 text-lg opacity-40 hover:opacity-100"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-xs opacity-50">
+              Eliminar un registro devuelve la mercancía al inventario y saca la plata de la caja.
+            </p>
+          </>
+        )}
+      </Tarjeta>
     </div>
   );
 }
 
-/** Un renglón: producto, cuánto salió y a cómo. Nada más. */
+/**
+ * Todos los registros de un mismo producto, bajo su encabezado.
+ *
+ * El nombre se escribe una vez arriba y no en cada renglón: así se ve de un
+ * golpe cuántas veces salió la papa hoy y por cuánto, sin leer cinco veces la
+ * misma palabra.
+ */
+function GrupoProducto({
+  grupo,
+  claveNueva,
+  refNueva,
+  onAgregarOtra,
+  onCambiar,
+  onQuitar,
+  onGuardar,
+  onForzar,
+}: {
+  grupo: Grupo;
+  claveNueva: number | null;
+  refNueva: React.RefObject<HTMLLIElement | null>;
+  onAgregarOtra: () => void;
+  onCambiar: (clave: number, cambios: Partial<Linea>) => void;
+  onQuitar: (clave: number) => void;
+  onGuardar: (linea: Linea) => void;
+  onForzar: (linea: Linea) => void;
+}) {
+  const subtotal = porMoneda(grupo.lineas);
+  const vendido = grupo.lineas.reduce((acc, l) => acc.plus(D(l.cantidad || '0')), D(0)).toString();
+
+  return (
+    <section className="rounded-lg border border-slate-200 dark:border-slate-800">
+      <header className="flex items-baseline justify-between gap-2 border-b border-slate-200 px-3 py-2 dark:border-slate-800">
+        <div className="min-w-0">
+          <p className="truncate font-bold">{grupo.nombre}</p>
+          <p className="tabular text-xs opacity-50">
+            quedan {conUnidad(grupo.stock, grupo.unidad)}
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="tabular text-sm font-semibold">{comoTexto(subtotal)}</p>
+          <p className="tabular text-xs opacity-50">
+            {conUnidad(vendido, grupo.unidad)} en {grupo.lineas.length}
+          </p>
+        </div>
+      </header>
+
+      <ul className="divide-y divide-slate-100 px-3 dark:divide-slate-800">
+        {grupo.lineas.map((linea, indice) => (
+          <RenglonVenta
+            key={linea.clave}
+            ref={linea.clave === claveNueva ? refNueva : undefined}
+            esNueva={linea.clave === claveNueva}
+            numeroEnGrupo={indice + 1}
+            totalEnGrupo={grupo.lineas.length}
+            linea={linea}
+            onCambiar={(cambios) => onCambiar(linea.clave, cambios)}
+            onQuitar={() => onQuitar(linea.clave)}
+            onGuardar={() => onGuardar(linea)}
+            onForzar={() => onForzar(linea)}
+          />
+        ))}
+      </ul>
+
+      {/* Repetir el mismo producto es lo más común del día: el botón vive aquí,
+          debajo del último renglón, para no tener que volver a la cuadrícula. */}
+      <button
+        type="button"
+        onClick={onAgregarOtra}
+        className="min-h-[44px] w-full rounded-b-lg border-t border-dashed border-slate-300 text-sm font-semibold opacity-70 transition hover:opacity-100 dark:border-slate-700"
+      >
+        + Añadir otra venta de {grupo.nombre.toLowerCase()}
+      </button>
+    </section>
+  );
+}
+
+/** Un registro: cuánto salió, a cómo y en qué se cobró. */
 function RenglonVenta({
   ref,
+  esNueva,
+  numeroEnGrupo,
+  totalEnGrupo,
   linea,
-  moneda,
   onCambiar,
   onQuitar,
   onGuardar,
   onForzar,
 }: {
   ref?: React.Ref<HTMLLIElement>;
+  esNueva: boolean;
+  numeroEnGrupo: number;
+  totalEnGrupo: number;
   linea: Linea;
-  moneda: Moneda;
   onCambiar: (cambios: Partial<Linea>) => void;
   onQuitar: () => void;
   onGuardar: () => void;
   onForzar: () => void;
 }) {
   const completa = D(linea.cantidad || '0').greaterThan(0) && D(linea.precio || '0').greaterThan(0);
-  const subtotal = completa ? D(linea.cantidad).times(D(linea.precio)).toString() : '0';
+  const subtotal = subtotalDe(linea);
   const pasaDelStock = D(linea.cantidad || '0').greaterThan(D(linea.stock));
 
   if (linea.estado === 'GUARDADA') {
     return (
-      <li ref={ref} className="flex items-center justify-between gap-2 py-2">
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium opacity-60 line-through">
-            {linea.nombre}
+      <li ref={ref} className="flex items-center justify-between gap-2 py-2.5">
+        <span className="min-w-0 flex-1 text-sm">
+          <span className="tabular opacity-60">
+            {conUnidad(linea.cantidad, linea.unidad)} ×{' '}
+            {formatMoney(money(linea.precio, linea.moneda))}
           </span>
-          <span className="text-xs text-emerald-700 dark:text-emerald-400">
+          <span className="block text-xs text-emerald-700 dark:text-emerald-400">
             Guardada · {linea.numero}
           </span>
         </span>
         <span className="tabular shrink-0 text-sm opacity-60">
-          {formatMoney(money(subtotal, moneda))}
+          {formatMoney(money(subtotal, linea.moneda))}
         </span>
       </li>
     );
@@ -514,17 +693,11 @@ function RenglonVenta({
 
   return (
     <li ref={ref} className="scroll-mt-24 space-y-2 py-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="min-w-0 truncate font-semibold">{linea.nombre}</p>
-        <button
-          type="button"
-          aria-label={`Quitar ${linea.nombre}`}
-          onClick={onQuitar}
-          className="shrink-0 px-2 text-lg opacity-40"
-        >
-          ✕
-        </button>
-      </div>
+      {totalEnGrupo > 1 && (
+        <p className="text-[11px] font-semibold tracking-wide uppercase opacity-40">
+          Registro {numeroEnGrupo}
+        </p>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <Campo
@@ -532,7 +705,7 @@ function RenglonVenta({
           valor={linea.cantidad}
           onChange={(v) => onCambiar({ cantidad: v })}
           numerico
-          autoFocus
+          autoFocus={esNueva}
         />
         <Campo
           etiqueta={`Precio por ${linea.unidad.toLowerCase()}`}
@@ -542,12 +715,36 @@ function RenglonVenta({
         />
       </div>
 
-      <div className="flex items-center justify-between gap-2">
-        <span className="tabular text-sm">
+      {/* La moneda es de esta venta, no de la tanda: en el mostrador una se
+          cobra en bolívares y la siguiente en dólares. */}
+      <div>
+        <p className="mb-1 text-xs font-medium opacity-70">¿En qué te la pagaron?</p>
+        <div className="grid grid-cols-3 gap-2">
+          {MONEDAS.map((codigo) => (
+            <button
+              key={codigo}
+              type="button"
+              onClick={() => onCambiar({ moneda: codigo })}
+              aria-pressed={linea.moneda === codigo}
+              className={[
+                'min-h-[44px] rounded-lg border text-sm font-semibold',
+                linea.moneda === codigo
+                  ? 'border-brand-600 bg-brand-600 text-white'
+                  : 'border-slate-300 dark:border-slate-700',
+              ].join(' ')}
+            >
+              {codigo}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="tabular min-w-0 flex-1 text-sm">
           {completa ? (
             <>
               <span className="opacity-60">Sale en </span>
-              <strong>{formatMoney(money(subtotal, moneda))}</strong>
+              <strong>{formatMoney(money(subtotal, linea.moneda))}</strong>
             </>
           ) : (
             <span className="opacity-50">Falta la cantidad y el precio</span>
@@ -561,6 +758,14 @@ function RenglonVenta({
         >
           {linea.estado === 'GUARDANDO' ? 'Guardando…' : 'Guardar'}
         </Boton>
+        <button
+          type="button"
+          aria-label={`Quitar el registro ${numeroEnGrupo} de ${linea.nombre}`}
+          onClick={onQuitar}
+          className="shrink-0 px-1 text-lg opacity-40"
+        >
+          ✕
+        </button>
       </div>
 
       {pasaDelStock && linea.estado !== 'ERROR' && (

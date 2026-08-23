@@ -152,6 +152,39 @@ describe('Ventas totales (mostrador, sin cliente)', () => {
     });
   });
 
+  describe('Cada registro lleva su propia moneda', () => {
+    it('en una misma tanda pueden convivir dólares y bolívares', async () => {
+      const { papa } = await base();
+      const ajo = await ProductoModel.create({ nombre: 'AJO', unidad: 'CAJA', stock: '10' });
+
+      const resultado = await registrarLote([
+        { productoId: papa._id.toString(), cantidad: '2', precio: '10', moneda: 'USD' },
+        { productoId: ajo._id.toString(), cantidad: '1', precio: '4000', moneda: 'VES' },
+      ]);
+      expect(resultado.fallidas).toHaveLength(0);
+
+      const corte = await delDia(diaDeHoy());
+      // 20 USD y 4000 VES, con 1 USD = 200 VES = 4000 COP: 40 USD en total.
+      expect(corte.totales.porMoneda.USD).toBe('40');
+      expect(corte.totales.porMoneda.VES).toBe('8000');
+      expect(corte.totales.porMoneda.COP).toBe('160000');
+    });
+
+    it('cada venta entra en la caja de su moneda', async () => {
+      const { papa } = await base();
+      const enDolares = await CajaModel.create({ nombre: 'Dólares', moneda: 'USD' });
+      const enBolivares = await CajaModel.create({ nombre: 'Bolívares', moneda: 'VES' });
+
+      await registrarLote([
+        { productoId: papa._id.toString(), cantidad: '2', precio: '10', moneda: 'USD' },
+        { productoId: papa._id.toString(), cantidad: '1', precio: '4000', moneda: 'VES' },
+      ]);
+
+      expect((await CajaModel.findById(enDolares._id))!.saldo).toBe('20');
+      expect((await CajaModel.findById(enBolivares._id))!.saldo).toBe('4000');
+    });
+  });
+
   describe('El corte del día', () => {
     it('suma cuánto se vendió y en cuánto sale en cada moneda', async () => {
       const { papa } = await base();
@@ -173,6 +206,34 @@ describe('Ventas totales (mostrador, sin cliente)', () => {
       const papaEnCorte = corte.porProducto.find((p) => p.nombre === 'PAPA')!;
       expect(papaEnCorte.cantidad).toBe('2');
       expect(papaEnCorte.totalPorMoneda.USD).toBe('20');
+    });
+
+    it('cada día trae solo lo suyo', async () => {
+      const { papa } = await base();
+      const ayer = new Date(Date.now() - 24 * 3_600_000);
+
+      await registrar({
+        productoId: papa._id.toString(),
+        cantidad: '1',
+        precio: '10',
+        moneda: 'USD',
+        fecha: ayer.toISOString(),
+      });
+      await registrar({
+        productoId: papa._id.toString(),
+        cantidad: '3',
+        precio: '10',
+        moneda: 'USD',
+      });
+
+      const hoy = await delDia(diaDeHoy());
+      expect(hoy.totales.registros).toBe(1);
+      expect(hoy.totales.porMoneda.USD).toBe('30');
+
+      const elDeAyer = await delDia(diaDeHoy(ayer));
+      expect(elDeAyer.totales.registros).toBe(1);
+      expect(elDeAyer.totales.porMoneda.USD).toBe('10');
+      expect(elDeAyer.esHoy).toBe(false);
     });
 
     it('no cuenta las ventas con cliente ni las anuladas', async () => {
