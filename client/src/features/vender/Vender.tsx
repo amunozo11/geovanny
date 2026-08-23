@@ -1,10 +1,19 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { D, MONEDAS, conUnidad, formatMoney, money, type Moneda } from '@geovanny/shared';
+import {
+  D,
+  MONEDAS,
+  cantidadTexto,
+  conUnidad,
+  formatMoney,
+  money,
+  type Moneda,
+} from '@geovanny/shared';
 import type { ApiError} from '../../lib/api';
 import { api } from '../../lib/api';
 import { Aviso, Boton, Campo, Tarjeta } from '../../components/ui/base';
+import { CampoCantidad } from '../../components/ui/CampoCantidad';
 import { CampoDinero } from '../../components/ui/CampoDinero';
 import { BuscadorPersona } from '../clientes/BuscadorPersona';
 import { CampoFecha, comoInstante, hoy } from '../../components/ui/CampoFecha';
@@ -162,11 +171,11 @@ export function Vender() {
               </button>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Campo
+              <CampoCantidad
                 etiqueta={`Cantidad (${elegido.unidad.toLowerCase()})`}
                 valor={cantidad}
                 onChange={setCantidad}
-                numerico
+                unidad={elegido.unidad}
                 autoFocus
               />
               <CampoDinero etiqueta="Precio por unidad" valor={precio} onChange={setPrecio} />
@@ -191,7 +200,7 @@ export function Vender() {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{linea.nombre}</span>
                   <span className="tabular text-xs opacity-60">
-                    {linea.cantidad} × {formatMoney(money(linea.precio, moneda))}
+                    {cantidadTexto(linea.cantidad)} × {formatMoney(money(linea.precio, moneda))}
                   </span>
                 </span>
                 <span className="tabular text-sm">

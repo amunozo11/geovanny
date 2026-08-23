@@ -174,3 +174,77 @@ export async function anularCargo(id: string, motivo: string, usuarioId?: string
 
   return CargoModel.findById(id);
 }
+
+/**
+ * Corregir un cargo ya registrado.
+ *
+ * Mismo criterio que con los abonos: el concepto y la nota se arreglan en el
+ * sitio —una errata no merece dos documentos—, pero si cambia el dinero se
+ * anula el original y nace uno nuevo, para que el saldo de la persona y la caja
+ * se deshagan por donde vinieron y se rehagan bien.
+ *
+ * Si ya recibió abonos no se deja: igual que al anular, primero hay que
+ * deshacer los abonos (RP-06).
+ */
+export async function corregirCargo(
+  id: string,
+  entrada: Partial<RegistrarCargo> & { motivo?: string },
+  usuarioId?: string | null,
+) {
+  const cargo = await CargoModel.findById(id);
+  if (!cargo) throw new NotFoundError('No se encontró el cargo.');
+  if (cargo.estado === 'ANULADO') {
+    throw new BusinessRuleError('YA_ANULADO', 'Este cargo está anulado: no se puede corregir.');
+  }
+
+  const nuevo = {
+    tipo: entrada.tipo ?? cargo.tipo,
+    concepto: entrada.concepto ?? cargo.concepto,
+    monto: entrada.monto ?? cargo.importe.monto,
+    moneda: entrada.moneda ?? cargo.moneda,
+    nota: entrada.nota === undefined ? cargo.nota : entrada.nota,
+    fecha: entrada.fecha ?? cargo.fecha.toISOString(),
+    salioDeCaja: entrada.salioDeCaja ?? cargo.salioDeCaja,
+  };
+
+  const tocaElDinero =
+    !D(nuevo.monto).equals(D(cargo.importe.monto)) ||
+    nuevo.moneda !== cargo.moneda ||
+    nuevo.salioDeCaja !== cargo.salioDeCaja ||
+    nuevo.fecha !== cargo.fecha.toISOString() ||
+    entrada.cajaId !== undefined;
+
+  if (!tocaElDinero) {
+    if (!nuevo.concepto.trim()) {
+      throw new BusinessRuleError('SIN_CONCEPTO', 'Escribe por qué te queda debiendo esto.');
+    }
+    await CargoModel.updateOne(
+      { _id: cargo._id },
+      { $set: { tipo: nuevo.tipo, concepto: nuevo.concepto.trim(), nota: nuevo.nota } },
+    );
+    return CargoModel.findById(id);
+  }
+
+  const motivo = entrada.motivo?.trim() || 'Corregido';
+  await anularCargo(id, motivo, usuarioId);
+
+  const corregido = await registrarCargo({
+    personaId: cargo.personaId.toString(),
+    tipo: nuevo.tipo,
+    concepto: nuevo.concepto,
+    monto: nuevo.monto,
+    moneda: nuevo.moneda,
+    salioDeCaja: nuevo.salioDeCaja,
+    cajaId: entrada.cajaId ?? null,
+    fecha: nuevo.fecha,
+    nota: nuevo.nota,
+    creadoPor: usuarioId,
+  });
+
+  await CargoModel.updateOne(
+    { _id: cargo._id },
+    { $set: { nota: `${cargo.nota ?? ''} · Corregido por ${corregido.numero}`.trim() } },
+  );
+
+  return corregido;
+}

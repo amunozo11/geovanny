@@ -297,3 +297,77 @@ export async function listarPagos(filtros: {
     .sort({ fecha: -1 })
     .limit(Math.min(filtros.limite ?? 50, 200));
 }
+
+/**
+ * Corregir un abono ya registrado.
+ *
+ * Si solo cambia el método o la nota, se edita en el sitio: crear dos
+ * documentos por arreglar una errata solo ensucia el historial.
+ *
+ * Si cambia el dinero —cuánto, en qué moneda, a qué deuda, de qué caja— NO se
+ * edita: se anula el original y nace uno nuevo. Un abono no es un dato suelto,
+ * es la punta de un hilo que llega a la deuda de la persona, al reparto sobre
+ * sus ventas y al saldo de la caja. Reescribirlo por encima dejaría todo eso
+ * apuntando a un número que ya no existe. Anulando y volviendo a crear, cada
+ * pieza se deshace por donde vino y se rehace bien, y en la cuenta quedan los
+ * dos documentos: lo que se registró primero y lo que de verdad pasó.
+ */
+export async function corregirPago(
+  id: string,
+  entrada: Partial<RegistrarPago> & { motivo?: string },
+  usuarioId?: string | null,
+) {
+  const pago = await PagoModel.findById(id);
+  if (!pago) throw new NotFoundError('No se encontró el abono.');
+  if (pago.estado === 'ANULADO') {
+    throw new BusinessRuleError('YA_ANULADO', 'Este abono está anulado: no se puede corregir.');
+  }
+
+  const nuevo = {
+    monto: entrada.monto ?? pago.importe.monto,
+    moneda: entrada.moneda ?? pago.importe.moneda,
+    aplicaA: entrada.aplicaA ?? pago.aplicaA,
+    metodo: entrada.metodo ?? pago.metodo,
+    nota: entrada.nota === undefined ? pago.nota : entrada.nota,
+    fecha: entrada.fecha ?? pago.fecha.toISOString(),
+  };
+
+  const tocaElDinero =
+    !D(nuevo.monto).equals(D(pago.importe.monto)) ||
+    nuevo.moneda !== pago.importe.moneda ||
+    nuevo.aplicaA !== pago.aplicaA ||
+    nuevo.fecha !== pago.fecha.toISOString() ||
+    entrada.cajaId !== undefined;
+
+  if (!tocaElDinero) {
+    await PagoModel.updateOne(
+      { _id: pago._id },
+      { $set: { metodo: nuevo.metodo, nota: nuevo.nota } },
+    );
+    return PagoModel.findById(id);
+  }
+
+  const motivo = entrada.motivo?.trim() || 'Corregido';
+  await anularPago(id, motivo);
+
+  const corregido = await registrarPago({
+    personaId: pago.personaId.toString(),
+    direccion: pago.direccion,
+    monto: nuevo.monto,
+    moneda: nuevo.moneda,
+    aplicaA: nuevo.aplicaA,
+    metodo: nuevo.metodo,
+    nota: nuevo.nota,
+    cajaId: entrada.cajaId ?? null,
+    fecha: nuevo.fecha,
+    creadoPor: usuarioId,
+  });
+
+  // El hilo queda atado por los dos lados: desde el viejo se llega al nuevo.
+  await PagoModel.updateOne(
+    { _id: pago._id },
+    { $set: { nota: `${pago.nota ?? ''} · Corregido por ${corregido.numero}`.trim() } },
+  );
+
+  return corregido;
+}

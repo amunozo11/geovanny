@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { D, MONEDAS, conUnidad, formatMoney, money, type Moneda } from '@geovanny/shared';
 import type { ApiError} from '../../lib/api';
 import { api } from '../../lib/api';
-import { Aviso, Boton, Campo, Tarjeta } from '../../components/ui/base';
+import { Aviso, Boton, Tarjeta } from '../../components/ui/base';
+import { CampoCantidad } from '../../components/ui/CampoCantidad';
 import { CampoDinero } from '../../components/ui/CampoDinero';
 import { BuscadorPersona } from '../clientes/BuscadorPersona';
 import { CampoFecha, comoInstante, hoy } from '../../components/ui/CampoFecha';
@@ -124,11 +125,11 @@ export function Comprar() {
           <div className="space-y-3">
             <p className="font-semibold">{elegido.nombre}</p>
             <div className="grid grid-cols-2 gap-3">
-              <Campo
+              <CampoCantidad
                 etiqueta={`Cuántos ${elegido.unidad.toLowerCase()}`}
                 valor={cantidad}
                 onChange={setCantidad}
-                numerico
+                unidad={elegido.unidad}
                 autoFocus
               />
               <CampoDinero etiqueta="Precio de compra" valor={precio} onChange={setPrecio} />

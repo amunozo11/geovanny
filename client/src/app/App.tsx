@@ -9,6 +9,7 @@ import { VentasTotales } from '../features/ventas/VentasTotales';
 import { Todo } from '../features/todo/Todo';
 import { Clientes } from '../features/clientes/Clientes';
 import { Cuenta } from '../features/clientes/Cuenta';
+import { Deudas } from '../features/clientes/Deudas';
 import { Inventario } from '../features/inventario/Inventario';
 import { Mas } from '../features/mas/Mas';
 import { Tasas } from '../features/mas/Tasas';
@@ -42,6 +43,7 @@ export function App() {
             <Route path="ventas-totales" element={<VentasTotales />} />
             <Route path="todo" element={<Todo />} />
             <Route path="clientes" element={<Clientes />} />
+            <Route path="clientes/deudas" element={<Deudas />} />
             <Route path="clientes/:id" element={<Cuenta />} />
             <Route path="proveedores/:id" element={<Cuenta />} />
             <Route path="inventario" element={<Inventario />} />

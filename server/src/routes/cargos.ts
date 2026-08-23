@@ -44,6 +44,19 @@ cargosRouter.post('/', requirePermission('charge:create'), async (req, res) => {
   res.status(201).json({ data: cargo });
 });
 
+/**
+ * Corregir. El concepto y la nota se editan en el sitio; cambiar el dinero
+ * anula el cargo y crea otro, para que el saldo y la caja se rehagan bien.
+ */
+cargosRouter.patch('/:id', requirePermission('charge:void'), async (req, res) => {
+  const entrada = crearSchema
+    .partial()
+    .extend({ motivo: z.string().max(200).optional() })
+    .parse(req.body);
+
+  res.json({ data: await cargos.corregirCargo(String(req.params.id), entrada, req.user!.id) });
+});
+
 cargosRouter.post('/:id/anular', requirePermission('charge:void'), async (req, res) => {
   const { motivo } = z
     .object({ motivo: z.string().min(3, 'Escribe el motivo').default('Registro equivocado') })

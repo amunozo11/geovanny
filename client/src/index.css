@@ -54,3 +54,50 @@ select,
 textarea {
   font-size: 16px;
 }
+
+/**
+ * Impresión: el PDF sale de aquí.
+ *
+ * No hay librería de PDF; se usa el diálogo del navegador, que en Android e iOS
+ * también ofrece "Guardar como PDF". Lo único que hace falta es quitar de en
+ * medio lo que no es la hoja —barras, botones— y forzar tinta negra sobre
+ * blanco, porque en modo oscuro saldría una página negra entera.
+ */
+@media print {
+  [data-noprint] {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  /* Sin sombras ni fondos: gastan tinta y no aportan nada en papel. */
+  table,
+  th,
+  td {
+    background: transparent !important;
+    color: #000 !important;
+    box-shadow: none !important;
+  }
+
+  th,
+  td {
+    border-bottom: 1px solid #999 !important;
+  }
+
+  /* Un cliente no se parte entre dos páginas. */
+  tr {
+    break-inside: avoid;
+  }
+
+  @page {
+    margin: 14mm;
+  }
+}

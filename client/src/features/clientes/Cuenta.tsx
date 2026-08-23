@@ -11,6 +11,9 @@ import { CampoDinero } from '../../components/ui/CampoDinero';
 import { useAuth } from '../auth/AuthContext';
 import type { Cargo, Operacion, Pago, Persona } from '../../lib/tipos';
 
+/** Qué se puede hacer con un movimiento ya registrado. */
+type Accion = 'editar' | 'eliminar';
+
 interface Cuenta {
   persona: Persona;
   operaciones: Operacion[];
@@ -31,6 +34,8 @@ export function Cuenta() {
   const { puede } = useAuth();
   const [abriendoAbono, setAbriendoAbono] = useState(false);
   const [abriendoCargo, setAbriendoCargo] = useState(false);
+  /** Corregir o quitar un movimiento concreto. Solo uno abierto a la vez. */
+  const [abierto, setAbierto] = useState<{ id: string; accion: Accion } | null>(null);
 
   const consulta = useQuery({
     queryKey: ['cuenta', id],
@@ -51,6 +56,23 @@ export function Cuenta() {
     ...pagos.map((p) => ({ tipo: 'pago' as const, fecha: p.fecha, dato: p })),
     ...cargos.map((c) => ({ tipo: 'cargo' as const, fecha: c.fecha, dato: c })),
   ].sort((a, b) => b.fecha.localeCompare(a.fecha));
+
+  const refrescar = () => {
+    setAbierto(null);
+    void clienteDeQuery.invalidateQueries();
+  };
+
+  const acciones = (movimientoId: string) => ({
+    panel: abierto?.id === movimientoId ? abierto.accion : null,
+    onAbrir: (accion: Accion) =>
+      setAbierto((previo) =>
+        previo?.id === movimientoId && previo.accion === accion
+          ? null
+          : { id: movimientoId, accion },
+      ),
+    onCerrar: () => setAbierto(null),
+    onListo: refrescar,
+  });
 
   return (
     <div className="space-y-4">
@@ -135,9 +157,21 @@ export function Cuenta() {
               movimiento.tipo === 'operacion' ? (
                 <FilaOperacion key={movimiento.dato.id} operacion={movimiento.dato} />
               ) : movimiento.tipo === 'pago' ? (
-                <FilaPago key={movimiento.dato.id} pago={movimiento.dato} />
+                <FilaPago
+                  key={movimiento.dato.id}
+                  pago={movimiento.dato}
+                  persona={persona}
+                  puedeTocar={puede('payment:void')}
+                  {...acciones(movimiento.dato.id)}
+                />
               ) : (
-                <FilaCargo key={movimiento.dato.id} cargo={movimiento.dato} />
+                <FilaCargo
+                  key={movimiento.dato.id}
+                  cargo={movimiento.dato}
+                  persona={persona}
+                  puedeTocar={puede('charge:void')}
+                  {...acciones(movimiento.dato.id)}
+                />
               ),
             )}
           </ul>
@@ -196,7 +230,23 @@ function FilaOperacion({ operacion }: { operacion: Operacion }) {
   );
 }
 
-function FilaPago({ pago }: { pago: Pago }) {
+function FilaPago({
+  pago,
+  persona,
+  puedeTocar,
+  panel,
+  onAbrir,
+  onCerrar,
+  onListo,
+}: {
+  pago: Pago;
+  persona: Persona;
+  puedeTocar: boolean;
+  panel: Accion | null;
+  onAbrir: (accion: Accion) => void;
+  onCerrar: () => void;
+  onListo: () => void;
+}) {
   const enOtraMoneda = pago.importe.moneda !== pago.aplicaA;
 
   return (
@@ -228,7 +278,121 @@ function FilaPago({ pago }: { pago: Pago }) {
           )}
         </div>
       </div>
+
+      {puedeTocar && <Acciones panel={panel} onAbrir={onAbrir} />}
+
+      {panel === 'editar' && (
+        <FormularioAbono
+          persona={persona}
+          pago={pago}
+          onListo={onListo}
+          onCancelar={onCerrar}
+        />
+      )}
+      {panel === 'eliminar' && (
+        <ConfirmarAnular
+          ruta={`/pagos/${pago.id}`}
+          que={`el abono ${pago.numero}`}
+          consecuencia={`La deuda de ${persona.nombre} vuelve a subir ${formatMoney(money(pago.montoAplicado, pago.aplicaA))} y la plata sale de la caja.`}
+          onListo={onListo}
+          onCancelar={onCerrar}
+        />
+      )}
     </li>
+  );
+}
+
+/**
+ * Corregir o quitar. Dos enlaces discretos: se usan poco, pero cuando se
+ * necesitan no puede haber que salir a otra pantalla a buscarlos.
+ */
+function Acciones({ panel, onAbrir }: { panel: Accion | null; onAbrir: (a: Accion) => void }) {
+  return (
+    <div className="mt-2 flex justify-end gap-3 text-xs">
+      <button
+        type="button"
+        onClick={() => onAbrir('editar')}
+        className={panel === 'editar' ? 'font-semibold underline' : 'underline opacity-60'}
+      >
+        Corregir
+      </button>
+      <button
+        type="button"
+        onClick={() => onAbrir('eliminar')}
+        className="text-rose-600 underline opacity-80 dark:text-rose-400"
+      >
+        Eliminar
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Quitar un movimiento.
+ *
+ * No se borra: se anula, y se deshace exactamente lo que hizo. Borrarlo de
+ * verdad dejaría un saldo sin explicación, que es el problema que este sistema
+ * viene a resolver. Por eso se pide el motivo y se dice antes qué va a pasar.
+ */
+function ConfirmarAnular({
+  ruta,
+  que,
+  consecuencia,
+  onListo,
+  onCancelar,
+}: {
+  ruta: string;
+  que: string;
+  consecuencia: string;
+  onListo: () => void;
+  onCancelar: () => void;
+}) {
+  const [motivo, setMotivo] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const anular = useMutation({
+    mutationFn: () =>
+      api(`${ruta}/anular`, {
+        method: 'POST',
+        body: JSON.stringify({ motivo: motivo.trim() || 'Registro equivocado' }),
+      }),
+    onSuccess: onListo,
+    onError: (e: ApiError) => setError(e.message),
+  });
+
+  return (
+    <div className="mt-3 space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+      <Aviso tono="atencion">
+        <p>¿Quitar {que}?</p>
+        <p className="mt-1 text-xs opacity-80">{consecuencia}</p>
+        <p className="mt-1 text-xs opacity-80">
+          No se borra del historial: queda marcado como anulado, con el motivo.
+        </p>
+      </Aviso>
+
+      <Campo
+        etiqueta="Motivo"
+        valor={motivo}
+        onChange={setMotivo}
+        placeholder="Registro equivocado"
+      />
+
+      {error && <Aviso tono="error">{error}</Aviso>}
+
+      <div className="flex gap-2">
+        <Boton variante="secundario" onClick={onCancelar} className="flex-1">
+          No, dejarlo
+        </Boton>
+        <Boton
+          variante="peligro"
+          onClick={() => anular.mutate()}
+          disabled={anular.isPending}
+          className="flex-1"
+        >
+          {anular.isPending ? 'Quitando…' : 'Sí, quitar'}
+        </Boton>
+      </div>
+    </div>
   );
 }
 
@@ -239,24 +403,35 @@ function FilaPago({ pago }: { pago: Pago }) {
  */
 function FormularioAbono({
   persona,
+  pago,
   onListo,
   onCancelar,
 }: {
   persona: Persona;
+  /** Si viene, se está corrigiendo ese abono en vez de crear uno nuevo. */
+  pago?: Pago;
   onListo: () => void;
   onCancelar: () => void;
 }) {
-  const deudas = MONEDAS.filter((m) => D(persona.saldos?.[m] ?? '0').greaterThan(0));
-  const [aplicaA, setAplicaA] = useState<Moneda>(deudas[0] ?? 'VES');
-  const [moneda, setMoneda] = useState<Moneda>(deudas[0] ?? 'VES');
-  const [monto, setMonto] = useState('');
+  const corrigiendo = Boolean(pago);
+
+  // Al corregir hay que poder elegir la deuda a la que ya se aplicó, aunque su
+  // saldo esté hoy en cero: fue este mismo abono el que la bajó.
+  const conSaldo = MONEDAS.filter((m) => D(persona.saldos?.[m] ?? '0').greaterThan(0));
+  const deudas = pago && !conSaldo.includes(pago.aplicaA) ? [pago.aplicaA, ...conSaldo] : conSaldo;
+
+  const [aplicaA, setAplicaA] = useState<Moneda>(pago?.aplicaA ?? deudas[0] ?? 'VES');
+  const [moneda, setMoneda] = useState<Moneda>(
+    pago?.importe.moneda ?? pago?.aplicaA ?? deudas[0] ?? 'VES',
+  );
+  const [monto, setMonto] = useState(pago?.importe.monto ?? '');
   const [cajaId, setCajaId] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const registrar = useMutation({
     mutationFn: () =>
-      api('/pagos', {
-        method: 'POST',
+      api(corrigiendo ? `/pagos/${pago!.id}` : '/pagos', {
+        method: corrigiendo ? 'PATCH' : 'POST',
         body: JSON.stringify({
           personaId: persona.id,
           direccion: persona.tipo === 'CLIENTE' ? 'ENTRA' : 'SALE',
@@ -273,9 +448,15 @@ function FormularioAbono({
   const saldo = persona.saldos?.[aplicaA] ?? '0';
   const distintaMoneda = moneda !== aplicaA;
 
-  return (
-    <Tarjeta titulo="Registrar abono">
+  const cuerpo = (
       <div className="space-y-3">
+        {corrigiendo && (
+          <Aviso tono="info">
+            Al cambiar el monto o la moneda, el abono {pago!.numero} se anula y nace uno nuevo con
+            los datos corregidos. Así la deuda y la caja se deshacen bien; los dos quedan en el
+            historial.
+          </Aviso>
+        )}
         <Seleccion
           etiqueta="¿A qué deuda?"
           valor={aplicaA}
@@ -323,11 +504,17 @@ function FormularioAbono({
             disabled={!monto || registrar.isPending}
             className="flex-1"
           >
-            {registrar.isPending ? 'Guardando…' : 'Guardar abono'}
+            {registrar.isPending ? 'Guardando…' : corrigiendo ? 'Guardar corrección' : 'Guardar abono'}
           </Boton>
         </div>
       </div>
-    </Tarjeta>
+  );
+
+  // Corrigiendo va dentro de la fila, sin tarjeta encima de tarjeta.
+  return corrigiendo ? (
+    <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-800">{cuerpo}</div>
+  ) : (
+    <Tarjeta titulo="Registrar abono">{cuerpo}</Tarjeta>
   );
 }
 
@@ -337,8 +524,25 @@ const ETIQUETA_CARGO: Record<Cargo['tipo'], string> = {
   AJUSTE: 'Ajuste',
 };
 
-function FilaCargo({ cargo }: { cargo: Cargo }) {
+function FilaCargo({
+  cargo,
+  persona,
+  puedeTocar,
+  panel,
+  onAbrir,
+  onCerrar,
+  onListo,
+}: {
+  cargo: Cargo;
+  persona: Persona;
+  puedeTocar: boolean;
+  panel: Accion | null;
+  onAbrir: (accion: Accion) => void;
+  onCerrar: () => void;
+  onListo: () => void;
+}) {
   const pendiente = D(cargo.saldo).greaterThan(0);
+  const conAbonos = !D(cargo.saldo).equals(D(cargo.importe.monto));
 
   return (
     <li className="py-3">
@@ -364,6 +568,37 @@ function FilaCargo({ cargo }: { cargo: Cargo }) {
           )}
         </div>
       </div>
+
+      {puedeTocar && <Acciones panel={panel} onAbrir={onAbrir} />}
+
+      {panel === 'editar' && (
+        <FormularioCargo
+          persona={persona}
+          cargo={cargo}
+          onListo={onListo}
+          onCancelar={onCerrar}
+        />
+      )}
+      {panel === 'eliminar' &&
+        (conAbonos ? (
+          <div className="mt-3 space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+            <Aviso tono="atencion">
+              Este cargo ya recibió abonos. Quítalos primero: si se borrara ahora, esos abonos
+              quedarían apuntando a una deuda que no existe.
+            </Aviso>
+            <Boton variante="secundario" onClick={onCerrar} className="w-full">
+              Entendido
+            </Boton>
+          </div>
+        ) : (
+          <ConfirmarAnular
+            ruta={`/cargos/${cargo.id}`}
+            que={`${ETIQUETA_CARGO[cargo.tipo].toLowerCase()} ${cargo.numero}`}
+            consecuencia={`La deuda de ${persona.nombre} baja ${formatMoney(money(cargo.importe.monto, cargo.moneda))}${cargo.salioDeCaja ? ' y la plata vuelve a la caja.' : '.'}`}
+            onListo={onListo}
+            onCancelar={onCerrar}
+          />
+        ))}
     </li>
   );
 }
@@ -378,17 +613,22 @@ function FilaCargo({ cargo }: { cargo: Cargo }) {
  */
 function FormularioCargo({
   persona,
+  cargo,
   onListo,
   onCancelar,
 }: {
   persona: Persona;
+  /** Si viene, se está corrigiendo ese cargo en vez de crear uno nuevo. */
+  cargo?: Cargo;
   onListo: () => void;
   onCancelar: () => void;
 }) {
-  const [tipo, setTipo] = useState<Cargo['tipo']>('PRESTAMO');
-  const [concepto, setConcepto] = useState('');
-  const [monto, setMonto] = useState('');
-  const [moneda, setMoneda] = useState<Moneda>('VES');
+  const corrigiendo = Boolean(cargo);
+
+  const [tipo, setTipo] = useState<Cargo['tipo']>(cargo?.tipo ?? 'PRESTAMO');
+  const [concepto, setConcepto] = useState(cargo?.concepto ?? '');
+  const [monto, setMonto] = useState(cargo?.importe.monto ?? '');
+  const [moneda, setMoneda] = useState<Moneda>(cargo?.moneda ?? 'VES');
   const [cajaId, setCajaId] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -397,8 +637,8 @@ function FormularioCargo({
 
   const registrar = useMutation({
     mutationFn: () =>
-      api('/cargos', {
-        method: 'POST',
+      api(corrigiendo ? `/cargos/${cargo!.id}` : '/cargos', {
+        method: corrigiendo ? 'PATCH' : 'POST',
         body: JSON.stringify({
           personaId: persona.id,
           tipo,
@@ -413,9 +653,15 @@ function FormularioCargo({
     onError: (e: ApiError) => setError(e.message),
   });
 
-  return (
-    <Tarjeta titulo="Prestar o cargar una deuda">
+  const cuerpo = (
       <div className="space-y-3">
+        {corrigiendo && (
+          <Aviso tono="info">
+            El concepto se arregla aquí mismo. Si cambias el monto o la moneda, el cargo{' '}
+            {cargo!.numero} se anula y nace uno nuevo, para que el saldo y la caja se deshagan
+            bien.
+          </Aviso>
+        )}
         <Seleccion
           etiqueta="¿Qué es?"
           valor={tipo}
@@ -471,10 +717,15 @@ function FormularioCargo({
             disabled={!concepto.trim() || !monto || registrar.isPending}
             className="flex-1"
           >
-            {registrar.isPending ? 'Guardando…' : 'Guardar'}
+            {registrar.isPending ? 'Guardando…' : corrigiendo ? 'Guardar corrección' : 'Guardar'}
           </Boton>
         </div>
       </div>
-    </Tarjeta>
+  );
+
+  return corrigiendo ? (
+    <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-800">{cuerpo}</div>
+  ) : (
+    <Tarjeta titulo="Prestar o cargar una deuda">{cuerpo}</Tarjeta>
   );
 }

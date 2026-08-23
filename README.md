@@ -80,7 +80,7 @@ en bolívares, son dos cuentas distintas, como en el cuaderno.
 | **Inicio** | Cuánto debes contra cuánto te deben, ventas del día, ganancia del mes, inventario y quién te debe |
 | **Vender** | Cliente, productos y guardar. Siempre fiado: se carga a la cuenta del cliente y los abonos se registran desde ahí |
 | **Ventas totales** | Lo del mostrador, sin cliente: se toca el producto, se pone cantidad y precio, y se va guardando uno a uno o todos de golpe. Al cerrar, cuánto salió y a cuánto equivale en dólares y en bolívares |
-| **Clientes** | Quién debe y cuánto; al entrar, su cuenta completa, el botón de abonar y el de prestarle o cargarle una deuda aparte |
+| **Clientes** | Quién debe y cuánto; al entrar, su cuenta completa, el botón de abonar y el de prestarle o cargarle una deuda aparte. Desde ahí sale la **hoja de cobro** imprimible (guardar como PDF) |
 | **Inventario** | Crear, editar y quitar productos —el catálogo empieza vacío—, existencias, costo real por bulto, conteos y mermas |
 | **Todo** | El cierre del día, moneda por moneda: lo vendido por producto, lo recogido, los gastos que se van anotando y cuánto debería quedar. Lo que sobra hoy es el saldo con el que arrancas mañana |
 | **Por días** | Todo lo que se registró cada día, en orden y con sus totales |
@@ -94,6 +94,9 @@ en bolívares, son dos cuentas distintas, como en el cuaderno.
 - **Vender descuenta el inventario y anota la deuda en la misma operación.** Si
   algo falla a mitad, no se guarda nada: nunca queda mercancía descontada por
   una venta que no existe.
+- **Medio bulto es medio bulto.** Las cantidades admiten fracciones y se leen
+  como se dicen: `½ bulto`, `2½ sacos`. Redondear a 1 sería vender en el papel
+  el doble de lo que salió del almacén.
 - **El cargue del viaje se reparte entre los productos** según lo que valga cada
   uno, así que sabes que el bulto costó 114.000 y no 104.000.
 - **Un abono se puede recibir en una moneda y aplicar a una deuda en otra**,

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { Types } from 'mongoose';
 import { z } from 'zod';
+import { D, MONEDAS, conUnidad } from '@geovanny/shared';
 import { PersonaModel, TIPOS_PERSONA } from '../models/persona.js';
 import { OperacionModel } from '../models/operacion.js';
 import { PagoModel } from '../models/pago.js';
@@ -43,6 +44,91 @@ personasRouter.patch('/:id', requirePermission('customer:write'), async (req, re
   const persona = await PersonaModel.findByIdAndUpdate(String(req.params.id), entrada, { new: true });
   if (!persona) throw new NotFoundError('No se encontró la persona.');
   res.json({ data: persona });
+});
+
+/**
+ * Quién debe y cuánto, en una sola tabla lista para imprimir.
+ *
+ * Es la hoja con la que se sale a cobrar: un renglón por persona, sin abrir
+ * nada. Por eso va **resumido y no detallado** — el nombre, desde cuándo, qué
+ * mercancía tiene pendiente y el total por moneda. El detalle venta a venta ya
+ * está en su cuenta, y en una hoja de cobro solo estorba.
+ */
+personasRouter.get('/deudas', async (req, res) => {
+  const tipo = String(req.query.tipo ?? 'CLIENTE');
+
+  const personas = await PersonaModel.find({ tipo, activo: true }).sort({ nombre: 1 });
+  const conDeuda = personas.filter((p) => MONEDAS.some((m) => D(p.saldos[m] ?? '0').greaterThan(0)));
+  if (conDeuda.length === 0) return res.json({ data: { generado: new Date(), filas: [] } });
+
+  const ids = conDeuda.map((p) => p._id);
+  const [operaciones, cargos] = await Promise.all([
+    // Solo lo que sigue sin pagarse: la hoja de cobro no lleva lo ya saldado.
+    OperacionModel.find({
+      personaId: { $in: ids },
+      estado: 'ACTIVA',
+      saldo: { $ne: '0' },
+    }).sort({ fecha: 1 }),
+    CargoModel.find({ personaId: { $in: ids }, estado: 'ACTIVO', saldo: { $ne: '0' } }).sort({
+      fecha: 1,
+    }),
+  ]);
+
+  const filas = conDeuda.map((persona) => {
+    const id = persona._id.toString();
+    const suyas = operaciones.filter((o) => o.personaId?.toString() === id);
+    const suyos = cargos.filter((c) => c.personaId.toString() === id);
+
+    // Qué se llevó, sumado por producto: "12 bultos papa · 3 cajas ajo".
+    const porProducto = new Map<string, { nombre: string; unidad: string; cantidad: string }>();
+    for (const operacion of suyas) {
+      for (const item of operacion.items) {
+        const clave = item.nombre;
+        const previo = porProducto.get(clave);
+        porProducto.set(clave, {
+          nombre: item.nombre,
+          unidad: item.unidad,
+          cantidad: D(previo?.cantidad ?? '0').plus(D(item.cantidad)).toString(),
+        });
+      }
+    }
+
+    const debe = [
+      ...[...porProducto.values()].map(
+        (p) => `${conUnidad(p.cantidad, p.unidad)} de ${p.nombre.toLowerCase()}`,
+      ),
+      ...suyos.map((c) => c.concepto),
+    ];
+
+    const fechas = [...suyas.map((o) => o.fecha), ...suyos.map((c) => c.fecha)].sort(
+      (a, b) => a.getTime() - b.getTime(),
+    );
+
+    return {
+      id,
+      nombre: persona.nombre,
+      telefono: persona.telefono,
+      /** El movimiento pendiente más antiguo: cuánto lleva esperando el cobro. */
+      desde: fechas[0] ?? null,
+      documentos: suyas.length + suyos.length,
+      debe,
+      saldos: Object.fromEntries(
+        MONEDAS.filter((m) => !D(persona.saldos[m] ?? '0').isZero()).map((m) => [
+          m,
+          persona.saldos[m]!,
+        ]),
+      ),
+    };
+  });
+
+  const total = Object.fromEntries(
+    MONEDAS.map((m) => [
+      m,
+      conDeuda.reduce((acc, p) => acc.plus(D(p.saldos[m] ?? '0')), D(0)).toString(),
+    ]),
+  );
+
+  res.json({ data: { generado: new Date(), filas, total } });
 });
 
 /**

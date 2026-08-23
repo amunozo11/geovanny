@@ -29,6 +29,20 @@ const registrarSchema = z.object({
   fecha: z.string().datetime().nullish(),
 });
 
+/**
+ * Corregir. Solo el método y la nota se editan en el sitio; cambiar el dinero
+ * anula el abono y crea otro, para que la deuda y la caja se rehagan bien.
+ */
+pagosRouter.patch('/:id', requirePermission('payment:void'), async (req, res) => {
+  const entrada = registrarSchema
+    .partial()
+    .extend({ motivo: z.string().max(200).optional() })
+    .parse(req.body);
+
+  const pago = await pagos.corregirPago(String(req.params.id), entrada, req.user!.id);
+  res.json({ data: pago });
+});
+
 pagosRouter.get('/', async (req, res) => {
   const lista = await pagos.listarPagos({
     personaId: req.query.personaId as string | undefined,

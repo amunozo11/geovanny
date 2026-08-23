@@ -4,12 +4,13 @@ import { ProductoModel } from '../models/producto.js';
 import { PersonaModel } from '../models/persona.js';
 import { CajaModel } from '../models/caja.js';
 import { CargoModel } from '../models/cargo.js';
+import { PagoModel } from '../models/pago.js';
 import { GastoModel } from '../models/gasto.js';
 import { limpiarCache, registrarTasa } from './tasas.service.js';
 import { crearOperacion } from './operaciones.service.js';
 import { registrar as venderTotal } from './ventasTotales.service.js';
-import { registrarCargo, anularCargo } from './cargos.service.js';
-import { registrarPago, anularPago } from './pagos.service.js';
+import { registrarCargo, anularCargo, corregirCargo } from './cargos.service.js';
+import { registrarPago, anularPago, corregirPago } from './pagos.service.js';
 import { guardarCierre, informeDelDia } from './todo.service.js';
 import { siguienteNumero } from '../models/contador.js';
 import { crearImporte } from '@geovanny/shared';
@@ -191,6 +192,124 @@ describe('Deudas que no vienen de una venta', () => {
 
       expect((await CargoModel.findById(cargo._id))!.saldo).toBe('100');
       expect((await PersonaModel.findById(cliente._id))!.saldos.USD).toBe('100');
+    });
+  });
+
+  describe('Corregir', () => {
+    it('cambiar solo el concepto no crea otro documento', async () => {
+      const { cliente } = await base();
+      const cargo = await registrarCargo({
+        personaId: cliente._id.toString(),
+        tipo: 'DEUDA',
+        concepto: 'Deudda del cuaderrno',
+        monto: '100',
+        moneda: 'USD',
+      });
+
+      const corregido = await corregirCargo(cargo._id.toString(), {
+        concepto: 'Deuda del cuaderno viejo',
+      });
+
+      expect(corregido!._id.toString()).toBe(cargo._id.toString());
+      expect(corregido!.concepto).toBe('Deuda del cuaderno viejo');
+      expect(corregido!.estado).toBe('ACTIVO');
+      expect(await CargoModel.countDocuments()).toBe(1);
+      // Una errata no mueve dinero.
+      expect((await PersonaModel.findById(cliente._id))!.saldos.USD).toBe('100');
+    });
+
+    it('cambiar el monto anula el viejo y crea uno nuevo, con el saldo bien', async () => {
+      const { cliente } = await base();
+      const caja = await CajaModel.create({ nombre: 'Dólares', moneda: 'USD', saldo: '500' });
+
+      const cargo = await registrarCargo({
+        personaId: cliente._id.toString(),
+        tipo: 'PRESTAMO',
+        concepto: 'Préstamo',
+        monto: '100',
+        moneda: 'USD',
+        cajaId: caja._id.toString(),
+      });
+
+      const corregido = await corregirCargo(cargo._id.toString(), { monto: '150' });
+
+      expect(corregido!._id.toString()).not.toBe(cargo._id.toString());
+      expect(corregido!.importe.monto).toBe('150');
+      expect((await CargoModel.findById(cargo._id))!.estado).toBe('ANULADO');
+      // 100 fuera, 100 de vuelta, 150 fuera: quedan 350, no 250 ni 400.
+      expect((await CajaModel.findById(caja._id))!.saldo).toBe('350');
+      expect((await PersonaModel.findById(cliente._id))!.saldos.USD).toBe('150');
+    });
+
+    it('no se corrige uno que ya recibió abonos', async () => {
+      const { cliente } = await base();
+      const cargo = await registrarCargo({
+        personaId: cliente._id.toString(),
+        tipo: 'PRESTAMO',
+        concepto: 'Préstamo',
+        monto: '100',
+        moneda: 'USD',
+      });
+      await registrarPago({
+        personaId: cliente._id.toString(),
+        direccion: 'ENTRA',
+        monto: '10',
+        moneda: 'USD',
+      });
+
+      await expect(corregirCargo(cargo._id.toString(), { monto: '150' })).rejects.toThrow(
+        /abonos/i,
+      );
+    });
+  });
+
+  describe('Corregir un abono', () => {
+    it('cambiar el método se edita en el sitio', async () => {
+      const { cliente } = await base();
+      await registrarCargo({
+        personaId: cliente._id.toString(),
+        tipo: 'DEUDA',
+        concepto: 'Deuda',
+        monto: '100',
+        moneda: 'USD',
+      });
+      const pago = await registrarPago({
+        personaId: cliente._id.toString(),
+        direccion: 'ENTRA',
+        monto: '40',
+        moneda: 'USD',
+      });
+
+      const corregido = await corregirPago(pago._id.toString(), { metodo: 'TRANSFERENCIA' });
+
+      expect(corregido!._id.toString()).toBe(pago._id.toString());
+      expect(corregido!.metodo).toBe('TRANSFERENCIA');
+      expect(await PagoModel.countDocuments({ estado: 'ACTIVO' })).toBe(1);
+    });
+
+    it('cambiar el monto rehace la deuda con el valor correcto', async () => {
+      const { cliente } = await base();
+      const cargo = await registrarCargo({
+        personaId: cliente._id.toString(),
+        tipo: 'DEUDA',
+        concepto: 'Deuda',
+        monto: '100',
+        moneda: 'USD',
+      });
+      const pago = await registrarPago({
+        personaId: cliente._id.toString(),
+        direccion: 'ENTRA',
+        monto: '40',
+        moneda: 'USD',
+      });
+
+      // Eran 60, no 40.
+      const corregido = await corregirPago(pago._id.toString(), { monto: '60' });
+
+      expect(corregido!._id.toString()).not.toBe(pago._id.toString());
+      expect((await PagoModel.findById(pago._id))!.estado).toBe('ANULADO');
+      expect((await CargoModel.findById(cargo._id))!.saldo).toBe('40');
+      expect((await PersonaModel.findById(cliente._id))!.saldos.USD).toBe('40');
     });
   });
 

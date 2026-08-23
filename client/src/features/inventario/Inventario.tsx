@@ -1,10 +1,20 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { D, MONEDAS, conUnidad, formatMoney, money, plural, type Moneda } from '@geovanny/shared';
+import {
+  D,
+  MONEDAS,
+  cantidadTexto,
+  conUnidad,
+  formatMoney,
+  money,
+  plural,
+  type Moneda,
+} from '@geovanny/shared';
 import type { ApiError } from '../../lib/api';
 import { api } from '../../lib/api';
 import { Aviso, Boton, Campo, Cargando, Seleccion, Tarjeta, Vacio } from '../../components/ui/base';
+import { CampoCantidad } from '../../components/ui/CampoCantidad';
 import { CampoDinero } from '../../components/ui/CampoDinero';
 import { useAuth } from '../auth/AuthContext';
 import type { Producto } from '../../lib/tipos';
@@ -157,7 +167,7 @@ function TarjetaProducto({
           <p
             className={`tabular text-xl font-bold ${bajo ? 'text-amber-600' : sinNada ? 'opacity-40' : ''}`}
           >
-            {producto.stock}
+            {cantidadTexto(producto.stock)}
           </p>
           <p className="text-xs opacity-60">{plural(producto.unidad, producto.stock)}</p>
         </div>
@@ -307,12 +317,11 @@ function FormularioProducto({
         <div className="space-y-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-800/50">
           <p className="text-xs font-semibold opacity-70">¿Ya tienes de este producto?</p>
           <div className="grid grid-cols-2 gap-3">
-            <Campo
+            <CampoCantidad
               etiqueta={`Cuántos ${plural(unidad, 2).toLowerCase()} hay`}
               valor={cantidadInicial}
               onChange={setCantidadInicial}
-              numerico
-              placeholder="0"
+              unidad={unidad}
             />
             <CampoDinero
               etiqueta="Costo por unidad"
@@ -434,11 +443,11 @@ function FormularioCantidad({
         ))}
       </div>
 
-      <Campo
+      <CampoCantidad
         etiqueta={`${elegido.ayuda} (${plural(producto.unidad, 2).toLowerCase()})`}
         valor={cantidad}
         onChange={setCantidad}
-        numerico
+        unidad={producto.unidad}
         autoFocus
       />
 

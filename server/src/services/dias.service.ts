@@ -1,4 +1,4 @@
-import { D, type Moneda } from '@geovanny/shared';
+import { D, cantidadTexto, type Moneda } from '@geovanny/shared';
 import { OperacionModel } from '../models/operacion.js';
 import { PagoModel } from '../models/pago.js';
 import { GastoModel } from '../models/gasto.js';
@@ -75,7 +75,7 @@ export async function detalleDelDia(dia: string, moneda: Moneda) {
       tipo: 'VENTA' as const,
       numero: v.numero,
       titulo: v.personaNombre,
-      detalle: `${v.items.map((i) => `${i.cantidad} ${i.nombre.toLowerCase()}`).join(' · ')}${
+      detalle: `${v.items.map((i) => `${cantidadTexto(i.cantidad)} ${i.nombre.toLowerCase()}`).join(' · ')}${
         v.formaPago === 'FIADO' ? ' · fiado' : v.formaPago === 'PARCIAL' ? ' · abonó algo' : ''
       }`,
       monto: v.total.eq[moneda],
@@ -90,7 +90,7 @@ export async function detalleDelDia(dia: string, moneda: Moneda) {
       tipo: 'COMPRA' as const,
       numero: c.numero,
       titulo: c.personaNombre,
-      detalle: c.items.map((i) => `${i.cantidad} ${i.nombre.toLowerCase()}`).join(' · '),
+      detalle: c.items.map((i) => `${cantidadTexto(i.cantidad)} ${i.nombre.toLowerCase()}`).join(' · '),
       monto: c.total.eq[moneda],
       montoOriginal: c.total.monto,
       monedaOriginal: c.moneda,
@@ -134,7 +134,7 @@ export async function detalleDelDia(dia: string, moneda: Moneda) {
       tipo: 'INVENTARIO' as const,
       numero: m.tipo.toLowerCase(),
       titulo: m.productoNombre,
-      detalle: `${m.cantidad} · ${m.motivo ?? ''}`.trim(),
+      detalle: `${cantidadTexto(m.cantidad)} · ${m.motivo ?? ''}`.trim(),
       monto: '0',
       montoOriginal: m.cantidad,
       monedaOriginal: '',

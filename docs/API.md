@@ -101,9 +101,17 @@ Clientes y proveedores comparten endpoint: son la misma entidad.
 | GET | `/` | `?tipo=CLIENTE` (o `PROVEEDOR`, `TRANSPORTE`) y `?q=` |
 | POST | `/` | `{nombre, tipo}` — solo el nombre es obligatorio (CN-3) |
 | PATCH | `/:id` | |
+| GET | `/deudas` | `?tipo=CLIENTE` — **hoja de cobro**: un renglón por persona con saldo |
 | GET | `/:id/cuenta` | **Estado de cuenta**: la persona, sus operaciones y sus abonos |
 
 `saldos` trae una deuda por moneda. Negativo significa saldo a favor.
+
+`GET /deudas` devuelve `{generado, filas, total}`. Cada fila trae `nombre`,
+`desde` (el movimiento pendiente más antiguo: cuánto lleva esperando el cobro),
+`debe` (la mercancía pendiente sumada por producto, más los conceptos de los
+préstamos) y `saldos` por moneda. Va **resumido y no detallado** a propósito: es
+la hoja con la que se sale a la calle, y ahí el detalle venta a venta estorba.
+Solo entra lo que sigue sin pagarse.
 
 ---
 
@@ -196,6 +204,23 @@ más `registros` y `cantidad`.
 Los equivalentes usan la tasa **congelada** de cada venta, así que el corte de un
 día pasado no se mueve aunque hoy la tasa sea otra (RC-03).
 
+### Corregir un abono o un cargo
+
+`PATCH` sobre cualquiera de los dos sigue la misma regla:
+
+- Si solo cambian los campos que **no mueven dinero** —el método y la nota en un
+  abono; el concepto, el tipo y la nota en un cargo— se edita en el sitio. Crear
+  dos documentos por arreglar una errata solo ensucia el historial.
+- Si cambia el dinero —cuánto, en qué moneda, a qué deuda, de qué caja, qué
+  día— **no se edita**: se anula el original y nace uno nuevo, y la respuesta es
+  el nuevo. Un abono no es un dato suelto: es la punta de un hilo que llega a la
+  deuda de la persona, al reparto sobre sus ventas y al saldo de la caja.
+  Reescribirlo por encima dejaría todo eso apuntando a un número que ya no
+  existe. Los dos documentos quedan en la cuenta, enlazados por la nota.
+
+Un cargo que ya recibió abonos no se puede corregir ni anular (`TIENE_ABONOS`,
+RP-06): primero hay que deshacer los abonos.
+
 `asignacionesCargo` reparte lo que sobre sobre los préstamos y deudas sueltas de
 la persona, después de las ventas. Sin eso, abonar un préstamo dejaría el abono
 entero marcado como "a favor".
@@ -215,6 +240,7 @@ documentos: siempre se puede responder de dónde salió cada peso que alguien de
 |---|---|---|
 | GET | `/` | `?personaId=&pendientes=true` |
 | POST | `/` | `{personaId, tipo, concepto, monto, moneda, salioDeCaja?, cajaId?, fecha?, nota?}` |
+| PATCH | `/:id` | Corregir. Los mismos campos, todos opcionales, más `motivo` |
 | POST | `/:id/anular` | `{motivo}` — devuelve el saldo y la plata a la caja |
 
 `tipo`: `PRESTAMO` (sale plata de la caja) · `DEUDA` (ya se debía, no mueve
@@ -277,6 +303,7 @@ Abonos, en las dos direcciones.
 |---|---|---|
 | GET | `/` | `?personaId=&direccion=&limite=` |
 | POST | `/` | Registrar abono |
+| PATCH | `/:id` | Corregir. Los mismos campos, todos opcionales, más `motivo` |
 | POST | `/:id/anular` | `{motivo}` — devuelve el saldo a las operaciones |
 
 ### `POST /api/pagos`

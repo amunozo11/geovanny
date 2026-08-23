@@ -18,7 +18,9 @@ export function Layout() {
     <div className="mx-auto min-h-dvh w-full max-w-3xl">
       {/* El selector de moneda vive arriba y siempre visible: es el mando que
           cambia todas las cifras de la aplicación. */}
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
+      <header
+        data-noprint
+        className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-bold">Geovanny</p>
@@ -45,7 +47,9 @@ export function Layout() {
         <Outlet />
       </main>
 
-      <nav className="safe-bottom fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+      <nav
+        data-noprint
+        className="safe-bottom fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
         <div className="mx-auto flex max-w-3xl items-center justify-around gap-0.5 px-1 py-1.5">
           {SECCIONES.map((seccion) => (
             <NavLink

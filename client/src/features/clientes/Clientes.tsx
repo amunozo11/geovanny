@@ -32,7 +32,14 @@ export function Clientes() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold">Clientes</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-xl font-bold">Clientes</h1>
+        {conDeuda.length > 0 && (
+          <Link to="/clientes/deudas" className="shrink-0 text-sm underline opacity-70">
+            Hoja de cobro
+          </Link>
+        )}
+      </div>
 
       <Campo valor={texto} onChange={setTexto} placeholder="Buscar cliente…" />
 
