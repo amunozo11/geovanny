@@ -6,7 +6,6 @@ import type { ApiError} from '../../lib/api';
 import { api } from '../../lib/api';
 import { Aviso, Boton, Campo, Tarjeta } from '../../components/ui/base';
 import { BuscadorPersona } from '../clientes/BuscadorPersona';
-import { SelectorCaja } from '../cajas/SelectorCaja';
 import { CampoFecha, comoInstante, hoy } from '../../components/ui/CampoFecha';
 import type { Persona, Producto } from '../../lib/tipos';
 
@@ -21,9 +20,15 @@ interface Linea {
 /**
  * Nueva venta en una sola pantalla.
  *
- * Sin pasos, sin ventanas encima de ventanas: cliente, productos, cómo paga y
- * guardar. El total se ve siempre, y tras agregar un producto el foco vuelve al
- * buscador para poder encadenar el siguiente sin tocar nada más.
+ * Sin pasos, sin ventanas encima de ventanas: cliente, productos y guardar. El
+ * total se ve siempre, y tras agregar un producto el foco vuelve al buscador
+ * para poder encadenar el siguiente sin tocar nada más.
+ *
+ * **Aquí todo se vende fiado.** Es lo que pasa siempre con un cliente con
+ * nombre: se despacha y queda debiendo. Lo de contado no pasa por esta pantalla,
+ * va por Ventas totales, en el mostrador. Por eso no hay ningún selector de
+ * forma de pago que tocar —ni que olvidarse de tocar—: los abonos se registran
+ * después desde la cuenta del cliente, que es cuando de verdad entra la plata.
  */
 export function Vender() {
   const navegar = useNavigate();
@@ -36,15 +41,8 @@ export function Vender() {
   const [elegido, setElegido] = useState<Producto | null>(null);
   const [cantidad, setCantidad] = useState('');
   const [precio, setPrecio] = useState('');
-  // Fiado por defecto: la venta con cliente de esta pantalla casi siempre queda
-  // debiendo —lo de contado va por Ventas totales, en el mostrador—, y arrancar
-  // en "Contado" hacía que una venta fiada se registrara como cobrada si a
-  // alguien se le pasaba tocar el botón.
-  const [formaPago, setFormaPago] = useState<'CONTADO' | 'FIADO' | 'PARCIAL'>('FIADO');
-  const [abono, setAbono] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [forzar, setForzar] = useState(false);
-  const [cajaId, setCajaId] = useState('');
   const [dia, setDia] = useState(hoy());
 
   const productos = useQuery({
@@ -70,9 +68,10 @@ export function Vender() {
             cantidad: l.cantidad,
             precio: l.precio,
           })),
-          formaPago,
-          pagado: formaPago === 'PARCIAL' ? abono || '0' : undefined,
-          cajaId: formaPago === 'FIADO' ? null : cajaId || null,
+          formaPago: 'FIADO',
+          // Fiado no mueve caja: la plata entra cuando el cliente abone, desde
+          // su cuenta, y ahí es donde se elige dónde cae.
+          cajaId: null,
           fecha: dia === hoy() ? undefined : comoInstante(dia),
         }),
       }),
@@ -234,49 +233,6 @@ export function Vender() {
         </p>
       </Tarjeta>
 
-      <Tarjeta titulo="Cómo paga">
-        <div className="grid grid-cols-3 gap-2">
-          {(
-            [
-              ['CONTADO', 'Contado'],
-              ['FIADO', 'Fiado'],
-              ['PARCIAL', 'Abona algo'],
-            ] as const
-          ).map(([valor, texto]) => (
-            <button
-              key={valor}
-              type="button"
-              onClick={() => setFormaPago(valor)}
-              className={[
-                'min-h-[52px] rounded-lg border text-sm font-semibold',
-                formaPago === valor
-                  ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900'
-                  : 'border-slate-300 dark:border-slate-700',
-              ].join(' ')}
-            >
-              {texto}
-            </button>
-          ))}
-        </div>
-
-        {formaPago !== 'FIADO' && (
-          <div className="mt-3">
-            <SelectorCaja moneda={moneda} valor={cajaId} onChange={setCajaId} />
-          </div>
-        )}
-
-        {formaPago === 'PARCIAL' && (
-          <div className="mt-3">
-            <Campo etiqueta="¿Cuánto abona ahora?" valor={abono} onChange={setAbono} numerico />
-            {abono && (
-              <p className="tabular mt-1 text-sm opacity-70">
-                Queda debiendo: {formatMoney(money(total.minus(D(abono || '0')).toString(), moneda))}
-              </p>
-            )}
-          </div>
-        )}
-      </Tarjeta>
-
       {error && (
         <Aviso tono="error">
           {error}
@@ -292,7 +248,7 @@ export function Vender() {
       {/* El total y el botón van juntos, pegados abajo: es lo último que se mira. */}
       <div className="safe-bottom sticky bottom-20 rounded-xl border border-slate-200 bg-white p-4 shadow-lg dark:border-slate-800 dark:bg-slate-900">
         <div className="mb-3 flex items-baseline justify-between">
-          <span className="text-sm opacity-60">Total</span>
+          <span className="text-sm opacity-60">Queda debiendo</span>
           <span className="tabular text-2xl font-bold">
             {formatMoney(money(total.toString(), moneda))}
           </span>
@@ -307,11 +263,16 @@ export function Vender() {
             ? 'Guardando…'
             : forzar
               ? 'Registrar igual (sin existencias)'
-              : 'Guardar venta'}
+              : 'Guardar venta fiada'}
         </Boton>
         {!cliente && <p className="mt-2 text-center text-xs opacity-50">Falta elegir el cliente</p>}
         {cliente && lineas.length === 0 && (
           <p className="mt-2 text-center text-xs opacity-50">Falta agregar productos</p>
+        )}
+        {puedeGuardar && (
+          <p className="mt-2 text-center text-xs opacity-50">
+            Se carga a la cuenta de {cliente.nombre}. Los abonos se registran desde ahí.
+          </p>
         )}
       </div>
     </div>
