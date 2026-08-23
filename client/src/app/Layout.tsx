@@ -5,10 +5,10 @@ import { useAuth } from '../features/auth/AuthContext';
 const SECCIONES = [
   { a: '/', texto: 'Inicio', icono: '🏠' },
   { a: '/inventario', texto: 'Inventario', icono: '📦' },
-  { a: '/vender', texto: 'Vender', icono: '＋', destacado: true },
-  { a: '/ventas-totales', texto: 'Totales', icono: '🧾' },
+  { a: '/vender', texto: 'Fiado', icono: '＋', destacado: true },
+  { a: '/ventas-totales', texto: 'Ventas', icono: '🧾' },
   { a: '/clientes', texto: 'Clientes', icono: '👥' },
-  { a: '/mas', texto: 'Más', icono: '☰' },
+  { a: '/mas', texto: 'Todo', icono: '☰' },
 ];
 
 export function Layout() {
