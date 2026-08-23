@@ -124,7 +124,8 @@ Ventas y compras (viajes).
 | GET | `/` | `?tipo=&canal=&personaId=&desde=&hasta=&pendientes=true&limite=` |
 | GET | `/:id` | |
 | POST | `/` | Crear. `?forzar=true` permite vender sin existencias |
-| POST | `/:id/anular` | `{motivo}` — revierte inventario y deuda. No hay DELETE ni edición |
+| PATCH | `/:id` | Corregir: `{items?, moneda?, fecha?, cargue?, nota?, motivo?}`. `?forzar=true` |
+| POST | `/:id/anular` | `{motivo}` — revierte inventario y deuda. No hay DELETE |
 
 ### `POST /api/operaciones`
 
@@ -204,21 +205,27 @@ más `registros` y `cantidad`.
 Los equivalentes usan la tasa **congelada** de cada venta, así que el corte de un
 día pasado no se mueve aunque hoy la tasa sea otra (RC-03).
 
-### Corregir un abono o un cargo
+### Corregir: la misma regla en los tres
 
-`PATCH` sobre cualquiera de los dos sigue la misma regla:
+`PATCH` sobre una operación, un abono o un cargo sigue siempre el mismo criterio:
 
-- Si solo cambian los campos que **no mueven dinero** —el método y la nota en un
-  abono; el concepto, el tipo y la nota en un cargo— se edita en el sitio. Crear
-  dos documentos por arreglar una errata solo ensucia el historial.
-- Si cambia el dinero —cuánto, en qué moneda, a qué deuda, de qué caja, qué
-  día— **no se edita**: se anula el original y nace uno nuevo, y la respuesta es
-  el nuevo. Un abono no es un dato suelto: es la punta de un hilo que llega a la
-  deuda de la persona, al reparto sobre sus ventas y al saldo de la caja.
-  Reescribirlo por encima dejaría todo eso apuntando a un número que ya no
-  existe. Los dos documentos quedan en la cuenta, enlazados por la nota.
+- Si solo cambian los campos que **no mueven dinero** —la nota en una operación;
+  el método y la nota en un abono; el concepto, el tipo y la nota en un cargo—
+  se edita en el sitio. Crear dos documentos por arreglar una errata solo
+  ensucia el historial.
+- Si cambia el dinero o la mercancía **no se edita**: se anula el original y
+  nace uno nuevo, y la respuesta es el nuevo. Una venta no es una fila con un
+  total: es un movimiento de inventario por producto, el stock de cada uno, el
+  costo promedio, la deuda de la persona, el dinero en la caja y la utilidad
+  congelada. Cambiar "12" por "10" a mano dejaría las otras seis cosas cuadradas
+  contra un número que ya no existe. Los dos documentos quedan en la cuenta,
+  enlazados por la nota.
 
-Un cargo que ya recibió abonos no se puede corregir ni anular (`TIENE_ABONOS`,
+**La corrección conserva la tasa congelada del original** (`tasaOriginal` por
+dentro). Sin eso, arreglar una cantidad de una venta de la semana pasada la
+revaluaría con la tasa de hoy y movería el cierre de aquel día (RC-03).
+
+Nada que ya haya recibido abonos se puede corregir ni anular (`TIENE_ABONOS`,
 RP-06): primero hay que deshacer los abonos.
 
 `asignacionesCargo` reparte lo que sobre sobre los préstamos y deudas sueltas de

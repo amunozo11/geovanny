@@ -191,6 +191,7 @@ function FormularioConteo({
         etiqueta="¿Cuánto hay realmente?"
         valor={saldoReal}
         onChange={setSaldoReal}
+        moneda={caja.moneda}
         autoFocus
       />
       {diferencia && !diferencia.isZero() && (
@@ -270,6 +271,7 @@ function FormularioTraslado({
           etiqueta={`Cuánto sale${origen ? ` (${origen.moneda})` : ''}`}
           valor={monto}
           onChange={setMonto}
+          moneda={origen?.moneda}
         />
 
         {esCambio && (
@@ -282,6 +284,7 @@ function FormularioTraslado({
               etiqueta={`Cuánto recibes en ${destino!.moneda} (opcional)`}
               valor={montoDestino}
               onChange={setMontoDestino}
+              moneda={destino!.moneda}
             />
           </>
         )}
@@ -361,6 +364,7 @@ function FormularioNuevaCaja({
           etiqueta="¿Cuánto hay ahora? (opcional)"
           valor={saldoInicial}
           onChange={setSaldoInicial}
+          moneda={moneda}
         />
         {error && <Aviso tono="error">{error}</Aviso>}
         <div className="flex gap-2">

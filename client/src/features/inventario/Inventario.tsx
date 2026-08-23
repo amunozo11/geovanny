@@ -303,6 +303,7 @@ function FormularioProducto({
           etiqueta="Precio de venta (opcional)"
           valor={precioVenta}
           onChange={setPrecioVenta}
+          moneda={monedaVenta}
         />
         <Campo
           etiqueta="Avisar cuando queden"
@@ -327,6 +328,7 @@ function FormularioProducto({
               etiqueta="Costo por unidad"
               valor={costoUnitario}
               onChange={setCostoUnitario}
+              moneda={monedaCosto}
               placeholder="0"
             />
           </div>

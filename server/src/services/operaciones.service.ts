@@ -43,6 +43,12 @@ export interface CrearOperacion {
   cajaId?: string | null;
   /** Si el negocio permite vender sin existencias (RP-14). */
   permitirStockNegativo?: boolean;
+  /**
+   * Tasa ya congelada que se debe reutilizar. Solo se usa al corregir: una
+   * venta corregida tiene que seguir valiendo lo que valía SU día (RC-03), o
+   * arreglar una cantidad movería el cierre de aquel día.
+   */
+  tasaOriginal?: TasaDelDia | null;
 }
 
 /** Reparte el cargue del viaje entre los productos, en proporción a su valor (RP-03). */
@@ -56,7 +62,7 @@ export async function crearOperacion(entrada: CrearOperacion) {
     throw new BusinessRuleError('SIN_ITEMS', 'Agrega al menos un producto.');
   }
 
-  const tasa: TasaDelDia = await tasaVigente();
+  const tasa: TasaDelDia = entrada.tasaOriginal ?? (await tasaVigente());
   const esVenta = entrada.tipo === 'VENTA';
   const canal: Canal = entrada.canal ?? 'CLIENTE';
   const esDirecta = canal === 'DIRECTA';
@@ -431,4 +437,90 @@ export async function listarOperaciones(filtros: {
   return OperacionModel.find(consulta)
     .sort({ fecha: -1 })
     .limit(Math.min(filtros.limite ?? 50, 200));
+}
+
+/**
+ * Corregir una operación ya registrada.
+ *
+ * Mismo criterio que con los abonos y los cargos: la nota se arregla en el
+ * sitio, pero tocar la mercancía o el dinero anula la operación y crea otra.
+ *
+ * Aquí es donde más se nota por qué. Una venta no es una fila con un total: es
+ * un movimiento de inventario por producto, el stock de cada uno, el costo
+ * promedio si fue compra, la deuda de la persona, el dinero en la caja y la
+ * utilidad congelada. Cambiar "12" por "10" a mano dejaría las otras seis cosas
+ * cuadradas contra un número que ya no existe. Deshaciéndola entera y
+ * rehaciéndola, cada pieza se revierte por donde vino.
+ *
+ * La operación corregida conserva la tasa del día original, así que el cierre
+ * de aquel día no se mueve por arreglar una cantidad (RC-03).
+ */
+export async function corregirOperacion(
+  id: string,
+  entrada: {
+    items?: ItemEntrada[];
+    moneda?: Moneda;
+    fecha?: string;
+    cargue?: { concepto: string; monto: string }[];
+    nota?: string | null;
+    cajaId?: string | null;
+    motivo?: string;
+    permitirStockNegativo?: boolean;
+  },
+  usuarioId?: string | null,
+) {
+  const operacion = await OperacionModel.findById(id);
+  if (!operacion) throw new NotFoundError('No se encontró la operación.');
+  if (operacion.estado === 'ANULADA') {
+    throw new BusinessRuleError('YA_ANULADA', 'Esta operación está anulada: no se puede corregir.');
+  }
+
+  const nota = entrada.nota === undefined ? operacion.nota : entrada.nota;
+  const soloLaNota =
+    entrada.items === undefined &&
+    entrada.moneda === undefined &&
+    entrada.fecha === undefined &&
+    entrada.cargue === undefined &&
+    entrada.cajaId === undefined;
+
+  if (soloLaNota) {
+    await OperacionModel.updateOne({ _id: operacion._id }, { $set: { nota } });
+    return OperacionModel.findById(id);
+  }
+
+  const motivo = entrada.motivo?.trim() || 'Corregida';
+  await anularOperacion(id, motivo, usuarioId);
+
+  const corregida = await crearOperacion({
+    tipo: operacion.tipo,
+    canal: operacion.canal,
+    personaId: operacion.personaId?.toString() ?? null,
+    descripcion: operacion.personaNombre,
+    moneda: entrada.moneda ?? operacion.moneda,
+    items:
+      entrada.items ??
+      operacion.items.map((i) => ({
+        productoId: i.productoId.toString(),
+        cantidad: i.cantidad,
+        precio: i.precio,
+      })),
+    cargue: entrada.cargue ?? operacion.cargue,
+    formaPago: operacion.formaPago,
+    // Se conserva lo que se había cobrado en el acto, no lo abonado después:
+    // solo se puede corregir una operación que aún no tiene abonos.
+    pagado: operacion.pagadoInicial,
+    fecha: entrada.fecha ?? operacion.fecha.toISOString(),
+    nota,
+    cajaId: entrada.cajaId ?? null,
+    tasaOriginal: operacion.total.tasa,
+    permitirStockNegativo: entrada.permitirStockNegativo ?? false,
+    creadoPor: usuarioId,
+  });
+
+  await OperacionModel.updateOne(
+    { _id: operacion._id },
+    { $set: { nota: `${operacion.nota ?? ''} · Corregida por ${corregida.numero}`.trim() } },
+  );
+
+  return corregida;
 }

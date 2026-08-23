@@ -750,6 +750,7 @@ function RenglonVenta({
           etiqueta={`Precio por ${linea.unidad.toLowerCase()}`}
           valor={linea.precio}
           onChange={(v) => onCambiar({ precio: v })}
+          moneda={linea.moneda}
         />
       </div>
 

@@ -132,7 +132,12 @@ export function Comprar() {
                 unidad={elegido.unidad}
                 autoFocus
               />
-              <CampoDinero etiqueta="Precio de compra" valor={precio} onChange={setPrecio} />
+              <CampoDinero
+                etiqueta="Precio de compra"
+                valor={precio}
+                onChange={setPrecio}
+                moneda={moneda}
+              />
             </div>
             <div className="flex gap-2">
               <Boton variante="secundario" onClick={() => setElegido(null)} className="flex-1">
@@ -171,7 +176,7 @@ export function Comprar() {
       )}
 
       <Tarjeta titulo="Cargue y transporte">
-        <CampoDinero valor={cargue} onChange={setCargue} placeholder="0" />
+        <CampoDinero valor={cargue} onChange={setCargue} moneda={moneda} placeholder="0" />
         <p className="mt-2 text-xs opacity-60">
           Se reparte entre los productos según lo que valga cada uno, para saber el costo real por
           bulto.

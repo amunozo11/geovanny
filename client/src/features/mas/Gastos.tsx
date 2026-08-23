@@ -80,7 +80,7 @@ export function Gastos() {
             }))}
           />
           <div className="grid grid-cols-2 gap-3">
-            <CampoDinero etiqueta="Monto" valor={monto} onChange={setMonto} />
+            <CampoDinero etiqueta="Monto" valor={monto} onChange={setMonto} moneda={moneda} />
             <Seleccion
               etiqueta="Moneda"
               valor={moneda}

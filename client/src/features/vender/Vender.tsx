@@ -178,7 +178,12 @@ export function Vender() {
                 unidad={elegido.unidad}
                 autoFocus
               />
-              <CampoDinero etiqueta="Precio por unidad" valor={precio} onChange={setPrecio} />
+              <CampoDinero
+                etiqueta="Precio por unidad"
+                valor={precio}
+                onChange={setPrecio}
+                moneda={moneda}
+              />
             </div>
             {cantidad && precio && (
               <p className="tabular text-sm opacity-70">

@@ -1,57 +1,48 @@
 import type { ChangeEvent } from 'react';
+import { defaultCurrencyRegistry, formatMoney, money, type Moneda } from '@geovanny/shared';
 
 /**
  * Campo para escribir dinero, con los puntos de miles puestos al vuelo.
  *
- * `Bs. 1844000` y `Bs. 184400` se distinguen contando ceros con el dedo en la
- * pantalla; `1.844.000` y `184.400` se distinguen de un vistazo. Cuando lo que
- * se teclea son millones todos los días, eso deja de ser un adorno.
+ * `1844000` y `184400` se distinguen contando ceros con el dedo; `1.844.000` y
+ * `184.400` se distinguen de un vistazo. Cuando lo que se teclea son millones
+ * todos los días, eso deja de ser un adorno.
  *
- * Por dentro el valor sigue siendo el de siempre —`1844000`, con punto decimal—
- * que es lo que espera la API. Los puntos son solo lo que se ve.
+ * **La coma es el decimal y el punto es el separador de miles. Siempre.** Es la
+ * misma convención con la que se muestran las cifras en toda la aplicación
+ * (`1.844.000,50`), así que lo que se teclea y lo que se lee coinciden.
+ *
+ * Antes se intentaba adivinar: un punto seguido de dos cifras se tomaba como
+ * decimal, uno seguido de tres como miles. Sobre un número ya escrito acertaba,
+ * pero **mientras se teclea no hay número completo que mirar**: al escribir
+ * `1.844.000`, en el momento del primer punto solo existe `1.`, y se
+ * interpretaba como decimal. A partir de ahí todo lo demás caía detrás de la
+ * coma y `1.844.000` acababa valiendo `1,844`. Adivinar salía caro; la regla
+ * fija no falla.
+ *
+ * Por dentro el valor sigue siendo el de siempre —`1844000.50`, con punto
+ * decimal— que es lo que espera la API.
  */
 
-/**
- * De lo que se ve a lo que se guarda.
- *
- * La coma es SIEMPRE el decimal. El punto es separador de miles cuando va
- * seguido de exactamente tres cifras, y decimal cuando no: así `1.844.000` son
- * un millón ochocientos cuarenta y cuatro mil, y `10.50` siguen siendo diez con
- * cincuenta. Es la regla que hace que teclear a la colombiana y teclear a la
- * americana den los dos el número que la persona tenía en la cabeza.
- *
- * El único caso que queda ambiguo es `1.234`, que se lee como mil doscientos
- * treinta y cuatro. En un negocio donde los precios van en miles de bolívares,
- * esa es la lectura correcta prácticamente siempre.
- */
-export function aCanonico(texto: string): string {
-  // Los puntos de delante no son decimales de nada: vienen del símbolo pegado
-  // ("Bs. 1.844.000") o de un dedo que se adelantó. Una coma de delante sí es
-  // decimal: quien escribe ",5" quiere medio.
-  const limpio = texto.replace(/[^\d.,]/g, '').replace(/^\.+/, '');
+/** Lo que se teclea → lo que se guarda. */
+export function aCanonico(texto: string, decimales = 2): string {
+  // Fuera todo lo que no sea cifra o coma: los puntos son separadores de miles
+  // y no aportan nada al valor.
+  const limpio = texto.replace(/[^\d,]/g, '');
   if (limpio === '') return '';
 
-  const conDecimal = (valor: string) => (valor.startsWith('.') ? `0${valor}` : valor);
+  // En una moneda sin céntimos (el peso) la coma no significa nada.
+  if (decimales === 0) return limpio.replace(/,/g, '');
 
-  if (limpio.includes(',')) {
-    const corte = limpio.lastIndexOf(',');
-    const entero = limpio.slice(0, corte).replace(/[.,]/g, '');
-    const decimales = limpio.slice(corte + 1).replace(/[.,]/g, '');
-    return conDecimal(`${entero}.${decimales}`);
-  }
+  const corte = limpio.indexOf(',');
+  if (corte === -1) return limpio;
 
-  // Fuera los puntos que separan grupos de tres.
-  const sinMiles = limpio.replace(/\.(?=\d{3}(?:\D|$))/g, '');
-
-  // Si sobrevive más de un punto, solo el primero puede ser el decimal.
-  const primero = sinMiles.indexOf('.');
-  if (primero === -1) return sinMiles;
-  return conDecimal(
-    sinMiles.slice(0, primero + 1) + sinMiles.slice(primero + 1).replace(/\./g, ''),
-  );
+  const entero = limpio.slice(0, corte);
+  const decimal = limpio.slice(corte + 1).replace(/,/g, '').slice(0, decimales);
+  return `${entero === '' ? '0' : entero}.${decimal}`;
 }
 
-/** De lo que se guarda a lo que se ve: `1844000` → `1.844.000`. */
+/** De lo que se guarda a lo que se ve: `1844000.5` → `1.844.000,5`. */
 export function agrupar(canonico: string): string {
   if (canonico === '') return '';
 
@@ -66,6 +57,7 @@ export function CampoDinero({
   etiqueta,
   valor,
   onChange,
+  moneda,
   placeholder,
   autoFocus,
   className = '',
@@ -74,10 +66,19 @@ export function CampoDinero({
   /** Valor canónico: `1844000.50`. Es lo que viaja a la API. */
   valor: string;
   onChange: (valor: string) => void;
+  /**
+   * La moneda decide si hay céntimos y permite leer debajo la cifra completa.
+   * Ese eco es la red: quien teclee `12.50` por costumbre ve al instante
+   * `US$ 1.250,00` y lo corrige antes de guardar.
+   */
+  moneda?: Moneda;
   placeholder?: string;
   autoFocus?: boolean;
   className?: string;
 }) {
+  const decimales = moneda ? defaultCurrencyRegistry.decimalsFor(moneda) : 2;
+  const hayAlgo = valor !== '' && valor !== '.';
+
   return (
     <label className={`block ${className}`}>
       {etiqueta && <span className="text-xs font-medium opacity-70">{etiqueta}</span>}
@@ -89,10 +90,15 @@ export function CampoDinero({
         placeholder={placeholder ? agrupar(placeholder) : undefined}
         autoFocus={autoFocus}
         onChange={(evento: ChangeEvent<HTMLInputElement>) =>
-          onChange(aCanonico(evento.target.value))
+          onChange(aCanonico(evento.target.value, decimales))
         }
         className="tabular mt-1 w-full rounded-lg border border-slate-300 px-3 py-3 dark:border-slate-700 dark:bg-slate-800"
       />
+      {moneda && hayAlgo && (
+        <span className="tabular mt-1 block text-xs opacity-60">
+          {formatMoney(money(valor, moneda))}
+        </span>
+      )}
     </label>
   );
 }

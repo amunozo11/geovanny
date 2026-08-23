@@ -1,5 +1,5 @@
 import mongoose, { Types } from 'mongoose';
-import { D, crearImporte, type Moneda } from '@geovanny/shared';
+import { D, crearImporte, type Moneda, type TasaDelDia } from '@geovanny/shared';
 import { CargoModel, type TipoCargo } from '../models/cargo.js';
 import { PersonaModel } from '../models/persona.js';
 import { siguienteNumero } from '../models/contador.js';
@@ -19,6 +19,8 @@ export interface RegistrarCargo {
   salioDeCaja?: boolean;
   fecha?: string | null;
   nota?: string | null;
+  /** Tasa congelada a reutilizar. Solo al corregir, para no revaluar el pasado. */
+  tasaOriginal?: TasaDelDia | null;
   creadoPor?: string | null;
 }
 
@@ -42,7 +44,7 @@ export async function registrarCargo(entrada: RegistrarCargo) {
   const persona = await PersonaModel.findById(entrada.personaId);
   if (!persona) throw new NotFoundError('No se encontró la persona.');
 
-  const tasa = await tasaVigente();
+  const tasa = entrada.tasaOriginal ?? (await tasaVigente());
   const importe = crearImporte(monto.toString(), entrada.moneda, tasa);
   // Prestar es entregar plata; anotar una deuda vieja, no. El usuario lo dice,
   // porque solo él sabe si el billete salió del cajón.
@@ -238,6 +240,8 @@ export async function corregirCargo(
     cajaId: entrada.cajaId ?? null,
     fecha: nuevo.fecha,
     nota: nuevo.nota,
+    // El cargo corregido vale lo que valía su día, no lo que vale hoy.
+    tasaOriginal: cargo.importe.tasa,
     creadoPor: usuarioId,
   });
 

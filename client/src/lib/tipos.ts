@@ -27,6 +27,7 @@ export interface Producto {
 }
 
 export interface ItemOperacion {
+  productoId: string;
   nombre: string;
   unidad: string;
   cantidad: string;
@@ -41,6 +42,8 @@ export interface Operacion {
   tipo: 'VENTA' | 'COMPRA';
   /** `DIRECTA` = venta total de mostrador, sin cliente detrás. */
   canal?: 'CLIENTE' | 'DIRECTA';
+  /** Nulo en las ventas de mostrador: no hay cliente detrás. */
+  personaId: string | null;
   personaNombre: string;
   fecha: string;
   items: ItemOperacion[];
@@ -49,8 +52,12 @@ export interface Operacion {
   pagado: string;
   saldo: string;
   formaPago: 'CONTADO' | 'FIADO' | 'PARCIAL';
+  /** Lo que se cobró en el acto. No cambia con los abonos posteriores. */
+  pagadoInicial: string;
   utilidad: string;
+  nota: string | null;
   estado: 'ACTIVA' | 'ANULADA';
+  motivoAnulacion?: string | null;
 }
 
 export interface Pago {

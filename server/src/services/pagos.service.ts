@@ -25,6 +25,13 @@ export interface RegistrarPago {
    * saber con qué tasa se cobró.
    */
   tasaAcordada?: { usdCop: string; usdVes: string } | null;
+  /**
+   * Tasa ya congelada que se debe reutilizar. Solo se usa al corregir: el
+   * abono corregido tiene que valer lo que valía SU día, no lo que vale hoy
+   * (RC-03). Sin esto, arreglar una errata de un abono viejo movería el cierre
+   * de aquel día.
+   */
+  tasaOriginal?: TasaDelDia | null;
   /** Caja donde entra o de donde sale el dinero. */
   cajaId?: string | null;
   /** Fecha del abono, por si se registra un día después. */
@@ -41,7 +48,7 @@ export async function registrarPago(entrada: RegistrarPago) {
   const persona = await PersonaModel.findById(entrada.personaId);
   if (!persona) throw new NotFoundError('No se encontró la persona.');
 
-  const vigente = await tasaVigente();
+  const vigente = entrada.tasaOriginal ?? (await tasaVigente());
   const tasa: TasaDelDia = entrada.tasaAcordada
     ? {
         usdCop: entrada.tasaAcordada.usdCop,
@@ -360,6 +367,8 @@ export async function corregirPago(
     nota: nuevo.nota,
     cajaId: entrada.cajaId ?? null,
     fecha: nuevo.fecha,
+    // El abono corregido vale lo que valía su día, no lo que vale hoy.
+    tasaOriginal: pago.importe.tasa,
     creadoPor: usuarioId,
   });
 

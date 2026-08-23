@@ -5,7 +5,7 @@ import { ProductoModel } from '../models/producto.js';
 import { PersonaModel } from '../models/persona.js';
 import { MovimientoModel } from '../models/movimiento.js';
 import { OperacionModel } from '../models/operacion.js';
-import { crearOperacion, anularOperacion } from './operaciones.service.js';
+import { crearOperacion, anularOperacion, corregirOperacion } from './operaciones.service.js';
 import { registrarPago } from './pagos.service.js';
 import { limpiarCache, registrarTasa } from './tasas.service.js';
 import { resumen } from './resumen.service.js';
@@ -391,5 +391,151 @@ describe('El negocio de punta a punta', () => {
       const vacio = await resumen('COP');
       expect(vacio.sinTasa).toBe(true);
     });
+  });
+});
+
+/** Base del bloque de correcciones: tasa puesta y papa con existencias. */
+async function baseConStock() {
+  await ponerTasa();
+  const { cliente, proveedor } = await crearBase();
+  const papa = (await ProductoModel.findOneAndUpdate(
+    { nombre: 'PAPA' },
+    { $set: { stock: '100', costoPromedio: '500' } },
+    { new: true },
+  ))!;
+  return { cliente, proveedor, papa };
+}
+
+describe('Corregir una venta ya registrada', () => {
+  beforeAll(async () => {
+    await startTestMongo();
+  }, 120_000);
+
+  afterAll(async () => {
+    await stopTestMongo();
+  });
+
+  beforeEach(async () => {
+    await clearTestMongo();
+    limpiarCache();
+  });
+
+  it('rehace el inventario con la cantidad correcta', async () => {
+    const { cliente, papa } = await baseConStock();
+
+    const venta = await crearOperacion({
+      tipo: 'VENTA',
+      personaId: cliente._id.toString(),
+      moneda: 'VES',
+      items: [{ productoId: papa._id.toString(), cantidad: '12', precio: '1000' }],
+      formaPago: 'FIADO',
+    });
+    const stockTrasVender = (await ProductoModel.findById(papa._id))!.stock;
+
+    // Eran 10, no 12.
+    const corregida = await corregirOperacion(venta._id.toString(), {
+      items: [{ productoId: papa._id.toString(), cantidad: '10', precio: '1000' }],
+    });
+
+    expect(corregida.numero).not.toBe(venta.numero);
+    expect((await OperacionModel.findById(venta._id))!.estado).toBe('ANULADA');
+    // 12 fuera, 12 de vuelta, 10 fuera: dos bultos más que antes de corregir.
+    expect((await ProductoModel.findById(papa._id))!.stock).toBe(
+      D(stockTrasVender).plus(2).toString(),
+    );
+    expect(corregida.total.monto).toBe('10000');
+  });
+
+  it('deja la deuda del cliente en el valor corregido, sin duplicarla', async () => {
+    const { cliente, papa } = await baseConStock();
+
+    const venta = await crearOperacion({
+      tipo: 'VENTA',
+      personaId: cliente._id.toString(),
+      moneda: 'VES',
+      items: [{ productoId: papa._id.toString(), cantidad: '12', precio: '1000' }],
+      formaPago: 'FIADO',
+    });
+    expect((await PersonaModel.findById(cliente._id))!.saldos.VES).toBe('12000');
+
+    await corregirOperacion(venta._id.toString(), {
+      items: [{ productoId: papa._id.toString(), cantidad: '10', precio: '1000' }],
+    });
+
+    expect((await PersonaModel.findById(cliente._id))!.saldos.VES).toBe('10000');
+  });
+
+  /**
+   * Lo que se protege aquí: corregir una cantidad no puede revaluar una venta
+   * vieja con la tasa de hoy, porque eso movería el cierre de aquel día (RC-03).
+   */
+  it('conserva la tasa del día original', async () => {
+    const { cliente, papa } = await baseConStock();
+
+    const venta = await crearOperacion({
+      tipo: 'VENTA',
+      personaId: cliente._id.toString(),
+      moneda: 'VES',
+      items: [{ productoId: papa._id.toString(), cantidad: '10', precio: '1000' }],
+      formaPago: 'FIADO',
+    });
+
+    // Al día siguiente el bolívar se devalúa a la mitad.
+    limpiarCache();
+    await registrarTasa({
+      usdCop: '3099.309008',
+      usdVes: '1792.448992',
+      mercado: 'PARALELO',
+      fuente: 'MANUAL',
+    });
+
+    const corregida = await corregirOperacion(venta._id.toString(), {
+      items: [{ productoId: papa._id.toString(), cantidad: '9', precio: '1000' }],
+    });
+
+    expect(corregida.total.tasa.usdVes).toBe(venta.total.tasa.usdVes);
+  });
+
+  it('la nota se arregla en el sitio, sin anular nada', async () => {
+    const { cliente, papa } = await baseConStock();
+
+    const venta = await crearOperacion({
+      tipo: 'VENTA',
+      personaId: cliente._id.toString(),
+      moneda: 'VES',
+      items: [{ productoId: papa._id.toString(), cantidad: '10', precio: '1000' }],
+      formaPago: 'FIADO',
+    });
+
+    const corregida = await corregirOperacion(venta._id.toString(), { nota: 'Se la llevó Wilmer' });
+
+    expect(corregida!._id.toString()).toBe(venta._id.toString());
+    expect(corregida!.nota).toBe('Se la llevó Wilmer');
+    expect(corregida!.estado).toBe('ACTIVA');
+    expect(await OperacionModel.countDocuments({ tipo: 'VENTA' })).toBe(1);
+  });
+
+  it('no se corrige una venta que ya recibió abonos', async () => {
+    const { cliente, papa } = await baseConStock();
+
+    const venta = await crearOperacion({
+      tipo: 'VENTA',
+      personaId: cliente._id.toString(),
+      moneda: 'VES',
+      items: [{ productoId: papa._id.toString(), cantidad: '10', precio: '1000' }],
+      formaPago: 'FIADO',
+    });
+    await registrarPago({
+      personaId: cliente._id.toString(),
+      direccion: 'ENTRA',
+      monto: '3000',
+      moneda: 'VES',
+    });
+
+    await expect(
+      corregirOperacion(venta._id.toString(), {
+        items: [{ productoId: papa._id.toString(), cantidad: '9', precio: '1000' }],
+      }),
+    ).rejects.toThrow(/abonos/i);
   });
 });

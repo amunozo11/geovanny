@@ -8,6 +8,8 @@ import { useMoneda } from '../moneda/contexto';
 import { SelectorCaja } from '../cajas/SelectorCaja';
 import { Aviso, Boton, Campo, Cargando, Seleccion, Tarjeta, Vacio } from '../../components/ui/base';
 import { CampoDinero } from '../../components/ui/CampoDinero';
+import { CampoCantidad } from '../../components/ui/CampoCantidad';
+import { CampoFecha, comoInstante } from '../../components/ui/CampoFecha';
 import { useAuth } from '../auth/AuthContext';
 import type { Cargo, Operacion, Pago, Persona } from '../../lib/tipos';
 
@@ -155,7 +157,13 @@ export function Cuenta() {
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {movimientos.map((movimiento) =>
               movimiento.tipo === 'operacion' ? (
-                <FilaOperacion key={movimiento.dato.id} operacion={movimiento.dato} />
+                <FilaOperacion
+                  key={movimiento.dato.id}
+                  operacion={movimiento.dato}
+                  persona={persona}
+                  puedeTocar={puede('sale:void')}
+                  {...acciones(movimiento.dato.id)}
+                />
               ) : movimiento.tipo === 'pago' ? (
                 <FilaPago
                   key={movimiento.dato.id}
@@ -192,8 +200,27 @@ function EquivalenteSiEsOtra({ importe }: { importe: Operacion['total'] }) {
   );
 }
 
-function FilaOperacion({ operacion }: { operacion: Operacion }) {
+function FilaOperacion({
+  operacion,
+  persona,
+  puedeTocar,
+  panel,
+  onAbrir,
+  onCerrar,
+  onListo,
+}: {
+  operacion: Operacion;
+  persona: Persona;
+  puedeTocar: boolean;
+  panel: Accion | null;
+  onAbrir: (accion: Accion) => void;
+  onCerrar: () => void;
+  onListo: () => void;
+}) {
   const pendiente = D(operacion.saldo).greaterThan(0);
+  // Con abonos encima no se toca: deshacerla dejaría esos abonos apuntando a
+  // una venta que ya no existe (RP-06).
+  const conAbonos = D(operacion.pagado).greaterThan(D(operacion.pagadoInicial ?? '0'));
 
   return (
     <li className="py-3">
@@ -226,7 +253,182 @@ function FilaOperacion({ operacion }: { operacion: Operacion }) {
           <EquivalenteSiEsOtra importe={operacion.total} />
         </div>
       </div>
+
+      {puedeTocar && <Acciones panel={panel} onAbrir={onAbrir} />}
+
+      {panel !== null &&
+        (conAbonos ? (
+          <div className="mt-3 space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+            <Aviso tono="atencion">
+              Esta venta ya recibió abonos. Quítalos primero: si se deshiciera ahora, esos abonos
+              quedarían apuntando a una venta que no existe.
+            </Aviso>
+            <Boton variante="secundario" onClick={onCerrar} className="w-full">
+              Entendido
+            </Boton>
+          </div>
+        ) : panel === 'editar' ? (
+          <FormularioVenta operacion={operacion} onListo={onListo} onCancelar={onCerrar} />
+        ) : (
+          <ConfirmarAnular
+            ruta={`/operaciones/${operacion.id}`}
+            que={`la venta ${operacion.numero}`}
+            consecuencia={`La mercancía vuelve al inventario y la deuda de ${persona.nombre} baja ${formatMoney(money(operacion.saldo, operacion.moneda))}.`}
+            onListo={onListo}
+            onCancelar={onCerrar}
+          />
+        ))}
     </li>
+  );
+}
+
+/**
+ * Corregir una venta ya registrada.
+ *
+ * Se arreglan las cantidades y los precios de lo que se despachó, se quita una
+ * línea, se cambia la moneda o el día. Añadir un producto que no estaba, no:
+ * eso ya no es corregir una anotación, es otra venta, y para eso está eliminar
+ * y volver a registrarla.
+ *
+ * Al guardar, la venta se deshace entera y se rehace —inventario, caja y deuda
+ * incluidos— conservando la tasa de su día, para que el cierre de aquel día no
+ * se mueva por arreglar una cantidad.
+ */
+function FormularioVenta({
+  operacion,
+  onListo,
+  onCancelar,
+}: {
+  operacion: Operacion;
+  onListo: () => void;
+  onCancelar: () => void;
+}) {
+  const [lineas, setLineas] = useState(
+    operacion.items.map((item, indice) => ({ clave: indice, ...item })),
+  );
+  const [moneda, setMoneda] = useState<Moneda>(operacion.moneda);
+  const [dia, setDia] = useState(operacion.fecha.slice(0, 10));
+  const [error, setError] = useState<string | null>(null);
+  const [forzar, setForzar] = useState(false);
+
+  const total = lineas.reduce(
+    (acc, l) => acc.plus(D(l.cantidad || '0').times(D(l.precio || '0'))),
+    D(0),
+  );
+
+  const cambiar = (clave: number, cambios: { cantidad?: string; precio?: string }) =>
+    setLineas((previas) =>
+      previas.map((l) => (l.clave === clave ? { ...l, ...cambios } : l)),
+    );
+
+  const guardar = useMutation({
+    mutationFn: () =>
+      api(`/operaciones/${operacion.id}` + (forzar ? '?forzar=true' : ''), {
+        method: 'PATCH',
+        body: JSON.stringify({
+          items: lineas.map((l) => ({
+            productoId: l.productoId,
+            cantidad: l.cantidad,
+            precio: l.precio,
+          })),
+          moneda,
+          fecha: comoInstante(dia),
+        }),
+      }),
+    onSuccess: onListo,
+    onError: (e: ApiError) => {
+      setError(e.message);
+      if (e.code === 'SIN_STOCK') setForzar(true);
+    },
+  });
+
+  const completas = lineas.every(
+    (l) => D(l.cantidad || '0').greaterThan(0) && D(l.precio || '0').greaterThan(0),
+  );
+
+  return (
+    <div className="mt-3 space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+      <Aviso tono="info">
+        La venta {operacion.numero} se anula y nace una nueva con lo corregido. El inventario y la
+        caja se rehacen solos, y se conserva la tasa de su día.
+      </Aviso>
+
+      <ul className="space-y-3">
+        {lineas.map((linea) => (
+          <li key={linea.clave} className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="min-w-0 truncate text-sm font-semibold">{linea.nombre}</p>
+              {lineas.length > 1 && (
+                <button
+                  type="button"
+                  aria-label={`Quitar ${linea.nombre}`}
+                  onClick={() => setLineas((p) => p.filter((l) => l.clave !== linea.clave))}
+                  className="shrink-0 px-2 text-lg opacity-40"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <CampoCantidad
+                etiqueta="Cantidad"
+                valor={linea.cantidad}
+                onChange={(v) => cambiar(linea.clave, { cantidad: v })}
+                unidad={linea.unidad}
+              />
+              <CampoDinero
+                etiqueta={`Precio por ${linea.unidad.toLowerCase()}`}
+                valor={linea.precio}
+                onChange={(v) => cambiar(linea.clave, { precio: v })}
+                moneda={moneda}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <Seleccion
+        etiqueta="Moneda de la venta"
+        valor={moneda}
+        onChange={setMoneda}
+        opciones={MONEDAS.map((m) => ({ valor: m, texto: m }))}
+      />
+
+      <CampoFecha valor={dia} onChange={setDia} etiqueta="¿Qué día fue la venta?" />
+
+      <p className="tabular text-sm">
+        <span className="opacity-60">Queda en </span>
+        <strong>{formatMoney(money(total.toString(), moneda))}</strong>
+        <span className="opacity-60">
+          {' '}
+          (antes {formatMoney(money(operacion.total.monto, operacion.moneda))})
+        </span>
+      </p>
+
+      <p className="text-xs opacity-50">
+        Para añadir un producto que no estaba, elimina la venta y regístrala de nuevo.
+      </p>
+
+      {error && <Aviso tono="error">{error}</Aviso>}
+
+      <div className="flex gap-2">
+        <Boton variante="secundario" onClick={onCancelar} className="flex-1">
+          Cancelar
+        </Boton>
+        <Boton
+          onClick={() => guardar.mutate()}
+          disabled={!completas || guardar.isPending}
+          variante={forzar ? 'peligro' : 'primario'}
+          className="flex-1"
+        >
+          {guardar.isPending
+            ? 'Guardando…'
+            : forzar
+              ? 'Corregir igual (sin existencias)'
+              : 'Guardar corrección'}
+        </Boton>
+      </div>
+    </div>
   );
 }
 
@@ -471,7 +673,13 @@ function FormularioAbono({
         />
 
         <div className="grid grid-cols-2 gap-3">
-          <CampoDinero etiqueta="¿Cuánto abona?" valor={monto} onChange={setMonto} autoFocus />
+          <CampoDinero
+            etiqueta="¿Cuánto abona?"
+            valor={monto}
+            onChange={setMonto}
+            moneda={moneda}
+            autoFocus
+          />
           <Seleccion
             etiqueta="¿En qué paga?"
             valor={moneda}
@@ -682,7 +890,7 @@ function FormularioCargo({
         />
 
         <div className="grid grid-cols-2 gap-3">
-          <CampoDinero etiqueta="Cuánto" valor={monto} onChange={setMonto} />
+          <CampoDinero etiqueta="Cuánto" valor={monto} onChange={setMonto} moneda={moneda} />
           <Seleccion
             etiqueta="Moneda"
             valor={moneda}

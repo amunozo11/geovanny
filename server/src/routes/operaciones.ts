@@ -81,6 +81,37 @@ operacionesRouter.post('/', async (req, res) => {
   res.status(201).json({ data: operacion });
 });
 
+/**
+ * Corregir. La nota se edita en el sitio; tocar la mercancía o el dinero anula
+ * la operación y crea otra, para que inventario, caja y deuda se rehagan bien.
+ */
+operacionesRouter.patch('/:id', requirePermission('sale:void'), async (req, res) => {
+  const entrada = z
+    .object({
+      items: z
+        .array(
+          z.object({ productoId: z.string().min(1), cantidad: numeroTexto, precio: numeroTexto }),
+        )
+        .min(1, 'Deja al menos un producto')
+        .optional(),
+      moneda: z.enum(MONEDAS).optional(),
+      cargue: z.array(z.object({ concepto: z.string().max(60), monto: numeroTexto })).optional(),
+      fecha: z.string().datetime().optional(),
+      nota: z.string().max(300).nullish(),
+      cajaId: z.string().nullish(),
+      motivo: z.string().max(200).optional(),
+    })
+    .parse(req.body);
+
+  const operacion = await operaciones.corregirOperacion(
+    String(req.params.id),
+    { ...entrada, permitirStockNegativo: req.query.forzar === 'true' },
+    req.user!.id,
+  );
+
+  res.json({ data: operacion });
+});
+
 operacionesRouter.post('/:id/anular', requirePermission('sale:void'), async (req, res) => {
   const { motivo } = z.object({ motivo: z.string().min(3, 'Escribe el motivo') }).parse(req.body);
   const operacion = await operaciones.anularOperacion(String(req.params.id), motivo, req.user!.id);

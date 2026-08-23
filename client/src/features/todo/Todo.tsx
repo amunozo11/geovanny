@@ -403,7 +403,7 @@ function NuevoGasto({ dia, onListo }: { dia: string; onListo: () => void }) {
         </Aviso>
       )}
 
-      <CampoDinero etiqueta="Cuánto" valor={monto} onChange={setMonto} />
+      <CampoDinero etiqueta="Cuánto" valor={monto} onChange={setMonto} moneda={moneda} />
 
       <div className="grid grid-cols-3 gap-2">
         {MONEDAS.map((codigo) => (
@@ -515,6 +515,7 @@ function FormularioCierre({
                 etiqueta={`${NOMBRE[m]} contados`}
                 valor={sobrante[m] ?? ''}
                 onChange={(v) => setSobrante((previo) => ({ ...previo, [m]: v }))}
+                moneda={m}
                 placeholder={informe.deberiaQuedar[m]}
               />
               {escrito && !dif.isZero() && (
