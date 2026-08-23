@@ -144,12 +144,17 @@ export interface CorteVentasTotales {
   totales: {
     registros: number;
     unidades: string;
+    /** La plata que entró de verdad en cada moneda. No son equivalentes. */
+    cobrado: Record<Moneda, string>;
+    /** El mismo dinero visto en cada moneda, para tener un total único. */
     porMoneda: Record<Moneda, string>;
   };
   porProducto: {
     nombre: string;
     unidad: string;
     cantidad: string;
+    registros: number;
+    cobrado: Record<Moneda, string>;
     totalPorMoneda: Record<Moneda, string>;
   }[];
   ventas: VentaTotalRegistrada[];

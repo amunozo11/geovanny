@@ -164,10 +164,35 @@ describe('Ventas totales (mostrador, sin cliente)', () => {
       expect(resultado.fallidas).toHaveLength(0);
 
       const corte = await delDia(diaDeHoy());
-      // 20 USD y 4000 VES, con 1 USD = 200 VES = 4000 COP: 40 USD en total.
+
+      // Lo cobrado NO se mezcla: 20 dólares en un bolsillo, 4.000 bolívares en
+      // el otro. Es lo que de verdad tiene en la mano.
+      expect(corte.totales.cobrado.USD).toBe('20');
+      expect(corte.totales.cobrado.VES).toBe('4000');
+      expect(corte.totales.cobrado.COP).toBe('0');
+
+      // El equivalente sí lo junta todo: 20 USD + 4000 VES = 40 USD.
       expect(corte.totales.porMoneda.USD).toBe('40');
       expect(corte.totales.porMoneda.VES).toBe('8000');
       expect(corte.totales.porMoneda.COP).toBe('160000');
+    });
+
+    it('el desglose por producto también separa lo cobrado de lo convertido', async () => {
+      const { papa } = await base();
+
+      await registrarLote([
+        { productoId: papa._id.toString(), cantidad: '2', precio: '10', moneda: 'USD' },
+        { productoId: papa._id.toString(), cantidad: '1', precio: '4000', moneda: 'VES' },
+      ]);
+
+      const corte = await delDia(diaDeHoy());
+      const fila = corte.porProducto.find((p) => p.nombre === 'PAPA')!;
+
+      expect(fila.cantidad).toBe('3');
+      expect(fila.registros).toBe(2);
+      expect(fila.cobrado.USD).toBe('20');
+      expect(fila.cobrado.VES).toBe('4000');
+      expect(fila.totalPorMoneda.USD).toBe('40');
     });
 
     it('cada venta entra en la caja de su moneda', async () => {

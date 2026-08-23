@@ -98,6 +98,9 @@ const hora = (fecha: Date): string =>
  * Los totales usan el equivalente congelado de cada venta, así que el corte de
  * un día pasado no se mueve aunque hoy la tasa sea otra (RC-03).
  */
+const enCero = (): Record<Moneda, string> =>
+  Object.fromEntries(MONEDAS.map((m) => [m, '0'])) as Record<Moneda, string>;
+
 export async function delDia(dia: string) {
   const { desde, hasta } = rangoDelDia(dia);
 
@@ -108,19 +111,38 @@ export async function delDia(dia: string) {
     fecha: { $gte: desde, $lt: hasta },
   }).sort({ fecha: -1 });
 
-  const totalPorMoneda = Object.fromEntries(
-    MONEDAS.map((m) => [
-      m,
-      ventas.reduce((acc, v) => acc.plus(D(v.total.eq[m])), D(0)).toString(),
-    ]),
-  ) as Record<Moneda, string>;
+  /**
+   * Dos cifras que NO son lo mismo y por eso viajan separadas:
+   *
+   * - `cobrado`: la plata que de verdad entró en cada moneda. Si vendió 40 USD
+   *   y 4.000 Bs, tiene 40 dólares en la mano y 4.000 bolívares en la otra.
+   * - `porMoneda`: el mismo dinero visto en cada moneda, para tener un total
+   *   único. Enseñar solo esto es lo que confunde: US$ 2.588 y Bs. 2.381.200
+   *   parecen dos ventas y son la misma, convertida.
+   */
+  const cobrado = enCero();
+  const totalPorMoneda = enCero();
+
+  for (const venta of ventas) {
+    cobrado[venta.moneda] = D(cobrado[venta.moneda]).plus(D(venta.total.monto)).toString();
+    for (const m of MONEDAS) {
+      totalPorMoneda[m] = D(totalPorMoneda[m]).plus(D(venta.total.eq[m])).toString();
+    }
+  }
 
   // Cuántas unidades salieron, agrupadas por producto: sumar bultos con cajas
   // daría un número que no significa nada, así que el desglose va por producto
   // y el gran total solo cuenta cuántos registros hubo.
   const porProducto = new Map<
     string,
-    { nombre: string; unidad: string; cantidad: string; totalPorMoneda: Record<Moneda, string> }
+    {
+      nombre: string;
+      unidad: string;
+      cantidad: string;
+      registros: number;
+      cobrado: Record<Moneda, string>;
+      totalPorMoneda: Record<Moneda, string>;
+    }
   >();
 
   for (const venta of ventas) {
@@ -131,10 +153,16 @@ export async function delDia(dia: string) {
         nombre: item.nombre,
         unidad: item.unidad,
         cantidad: '0',
-        totalPorMoneda: Object.fromEntries(MONEDAS.map((m) => [m, '0'])) as Record<Moneda, string>,
+        registros: 0,
+        cobrado: enCero(),
+        totalPorMoneda: enCero(),
       };
 
       acumulado.cantidad = D(acumulado.cantidad).plus(D(item.cantidad)).toString();
+      acumulado.registros += 1;
+      acumulado.cobrado[venta.moneda] = D(acumulado.cobrado[venta.moneda])
+        .plus(D(item.subtotal))
+        .toString();
 
       // El equivalente de la línea, en proporción a lo que pesa en su venta.
       // Con una sola línea por venta —que es lo normal aquí— es el total.
@@ -161,6 +189,7 @@ export async function delDia(dia: string) {
       unidades: ventas
         .reduce((acc, v) => acc.plus(v.items.reduce((s, i) => s.plus(D(i.cantidad)), D(0))), D(0))
         .toString(),
+      cobrado,
       porMoneda: totalPorMoneda,
     },
     porProducto: [...porProducto.values()].sort((a, b) => a.nombre.localeCompare(b.nombre)),

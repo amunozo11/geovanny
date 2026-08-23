@@ -18,6 +18,7 @@ import { Aviso, Boton, Campo, Cargando, Tarjeta, Vacio } from '../../components/
 import { CampoFecha, TiraDeDias, comoInstante, etiquetaDia, hoy } from '../../components/ui/CampoFecha';
 import { SelectorCaja } from '../cajas/SelectorCaja';
 import { useAuth } from '../auth/AuthContext';
+import { useMoneda } from '../moneda/contexto';
 import type { CorteVentasTotales, Producto, ResultadoLote } from '../../lib/tipos';
 
 /**
@@ -64,6 +65,12 @@ interface Grupo {
   lineas: Linea[];
 }
 
+const NOMBRE_MONEDA: Record<Moneda, string> = {
+  COP: 'pesos',
+  USD: 'dólares',
+  VES: 'bolívares',
+};
+
 const enCero = (): Record<Moneda, string> =>
   Object.fromEntries(MONEDAS.map((m) => [m, '0'])) as Record<Moneda, string>;
 
@@ -91,6 +98,8 @@ function comoTexto(total: Record<Moneda, string>): string {
 export function VentasTotales() {
   const clienteDeQuery = useQueryClient();
   const { puede } = useAuth();
+  /** La moneda del selector de arriba: solo para el "todo junto vale…". */
+  const { moneda } = useMoneda();
 
   const [dia, setDia] = useState(hoy());
   /** Moneda que se propone en el renglón siguiente: la última que se usó. */
@@ -318,6 +327,11 @@ export function VentasTotales() {
   const guardando = guardarTodas.isPending || guardarUna.isPending;
   const esHoy = dia === hoy();
 
+  // Solo se enseñan las monedas en las que de verdad se cobró algo ese día.
+  // Un "$ 0" al lado de las cifras buenas es ruido que hay que leer y descartar.
+  const conCobro = MONEDAS.filter((m) => !D(corte.data?.totales.cobrado[m] ?? '0').isZero());
+  const monedasCobradas: Moneda[] = conCobro.length > 0 ? conCobro : ['USD', 'VES'];
+
   return (
     <div className="space-y-4">
       <div>
@@ -462,30 +476,36 @@ export function VentasTotales() {
         )}
 
         <p className="text-xs tracking-wide uppercase opacity-50">
-          {esHoy ? 'Vendido hoy de mostrador' : `Vendido el ${etiquetaDia(dia).toLowerCase()} ${dia}`}
+          {esHoy
+            ? 'Cobrado hoy en el mostrador'
+            : `Cobrado el ${etiquetaDia(dia).toLowerCase()} ${dia}`}
         </p>
 
         {corte.isLoading ? (
           <p className="mt-1 text-sm opacity-60">Sumando…</p>
         ) : (
           <>
-            <div className="mt-1 grid grid-cols-2 gap-2">
-              {(['USD', 'VES'] as const).map((m) => (
+            {/* Lo que entró EN CADA MONEDA, que es plata distinta: los dólares
+                están en un bolsillo y los bolívares en otro. El equivalente
+                —el mismo dinero convertido— va debajo y en pequeño, porque
+                enseñarlo arriba hace creer que se vendió el doble. */}
+            <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-2">
+              {monedasCobradas.map((m) => (
                 <div key={m}>
-                  <p className="text-[11px] uppercase opacity-50">
-                    {m === 'USD' ? 'Dólares' : 'Bolívares'}
-                  </p>
+                  <p className="text-[11px] uppercase opacity-50">En {NOMBRE_MONEDA[m]}</p>
                   <p className="tabular text-xl font-bold">
-                    {formatMoney(money(corte.data?.totales.porMoneda[m] ?? '0', m))}
+                    {formatMoney(money(corte.data?.totales.cobrado[m] ?? '0', m))}
                   </p>
                 </div>
               ))}
             </div>
             <p className="tabular mt-2 text-xs opacity-60">
-              {formatMoney(money(corte.data?.totales.porMoneda.COP ?? '0', 'COP'))} ·{' '}
               {corte.data?.totales.unidades ?? '0'} en total ·{' '}
               {corte.data?.totales.registros ?? 0}{' '}
               {corte.data?.totales.registros === 1 ? 'registro' : 'registros'}
+              {(corte.data?.totales.registros ?? 0) > 0 && (
+                <> · todo junto vale {formatMoney(money(corte.data!.totales.porMoneda[moneda], moneda))}</>
+              )}
             </p>
           </>
         )}
@@ -505,23 +525,37 @@ export function VentasTotales() {
       {(corte.data?.porProducto.length ?? 0) > 0 && (
         <Tarjeta titulo="Cuánto salió de cada producto">
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-            {corte.data!.porProducto.map((fila) => (
-              <li key={fila.nombre} className="flex items-baseline justify-between gap-3 py-2">
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium">{fila.nombre}</span>
-                  <span className="tabular text-xs opacity-60">
-                    {conUnidad(fila.cantidad, fila.unidad)}
+            {corte.data!.porProducto.map((fila) => {
+              const cobradoEn = MONEDAS.filter((m) => !D(fila.cobrado[m]).isZero());
+
+              return (
+                <li key={fila.nombre} className="flex items-start justify-between gap-3 py-2.5">
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium">{fila.nombre}</span>
+                    <span className="tabular text-xs opacity-60">
+                      {conUnidad(fila.cantidad, fila.unidad)} en {fila.registros}{' '}
+                      {fila.registros === 1 ? 'venta' : 'ventas'}
+                    </span>
                   </span>
-                </span>
-                <span className="tabular shrink-0 text-right text-sm">
-                  <span className="block">{formatMoney(money(fila.totalPorMoneda.USD, 'USD'))}</span>
-                  <span className="block text-xs opacity-60">
-                    {formatMoney(money(fila.totalPorMoneda.VES, 'VES'))}
+                  {/* Lo cobrado en cada moneda, una línea por moneda. */}
+                  <span className="shrink-0 text-right">
+                    {cobradoEn.map((m) => (
+                      <span key={m} className="tabular block text-sm font-semibold">
+                        {formatMoney(money(fila.cobrado[m], m))}
+                      </span>
+                    ))}
+                    <span className="tabular block text-xs opacity-50">
+                      = {formatMoney(money(fila.totalPorMoneda[moneda], moneda))}
+                    </span>
                   </span>
-                </span>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
+          <p className="mt-3 text-xs opacity-50">
+            Arriba, lo que cobraste de verdad en cada moneda. Debajo en gris, todo junto convertido
+            a {NOMBRE_MONEDA[moneda]} con la tasa del día de cada venta.
+          </p>
         </Tarjeta>
       )}
 

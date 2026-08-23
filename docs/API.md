@@ -181,10 +181,20 @@ monedas distintas y cada una cae en la caja de la suya.
 `forzar: true` registra aunque no haya existencias, igual que `?forzar=true` en
 las ventas normales (RP-14).
 
-`GET /` devuelve los totales del día —cuántos registros, cuántas unidades y el
-equivalente en COP, USD y VES—, el desglose por producto y la lista registro por
-registro. Los totales usan el equivalente **congelado** de cada venta, así que el
-corte de un día pasado no se mueve aunque hoy la tasa sea otra (RC-03).
+`GET /` devuelve los totales del día, el desglose por producto y la lista
+registro por registro. Los totales traen **dos cifras que no son lo mismo** y por
+eso viajan separadas:
+
+- `cobrado`: la plata que entró de verdad en cada moneda. Si vendió 20 USD y
+  4.000 Bs, tiene 20 dólares en un bolsillo y 4.000 bolívares en el otro.
+- `porMoneda`: ese mismo dinero visto en cada moneda, para tener un total único.
+
+Enseñar solo `porMoneda` es lo que confunde: `US$ 40` y `Bs. 8.000` parecen dos
+ventas distintas y son la misma, convertida. `porProducto` trae las dos igual,
+más `registros` y `cantidad`.
+
+Los equivalentes usan la tasa **congelada** de cada venta, así que el corte de un
+día pasado no se mueve aunque hoy la tasa sea otra (RC-03).
 
 ---
 
