@@ -196,6 +196,77 @@ más `registros` y `cantidad`.
 Los equivalentes usan la tasa **congelada** de cada venta, así que el corte de un
 día pasado no se mueve aunque hoy la tasa sea otra (RC-03).
 
+`asignacionesCargo` reparte lo que sobre sobre los préstamos y deudas sueltas de
+la persona, después de las ventas. Sin eso, abonar un préstamo dejaría el abono
+entero marcado como "a favor".
+
+---
+
+## `/api/cargos`
+
+Deudas que **no** vienen de una venta: un préstamo en efectivo, una deuda vieja
+que se pasa al sistema, un saldo mal registrado que hay que corregir.
+
+Existen porque el saldo de una persona no se toca a mano. Igual que el stock se
+mueve con movimientos y no escribiendo el número (RC-10), la deuda se mueve con
+documentos: siempre se puede responder de dónde salió cada peso que alguien debe.
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/` | `?personaId=&pendientes=true` |
+| POST | `/` | `{personaId, tipo, concepto, monto, moneda, salioDeCaja?, cajaId?, fecha?, nota?}` |
+| POST | `/:id/anular` | `{motivo}` — devuelve el saldo y la plata a la caja |
+
+`tipo`: `PRESTAMO` (sale plata de la caja) · `DEUDA` (ya se debía, no mueve
+dinero) · `AJUSTE` (corrige un saldo). `salioDeCaja` decide de verdad si se
+descuenta de la caja; por defecto es `true` solo para `PRESTAMO`, porque el
+sistema no puede adivinar si el billete salió del cajón.
+
+El `concepto` es obligatorio: una deuda sin explicación es el problema que este
+sistema viene a resolver. Numeración propia `D-0001`.
+
+Se saldan con los mismos abonos de `/api/pagos` y aparecen en
+`GET /api/personas/:id/cuenta`. Un cargo con abonos no se puede anular
+(`TIENE_ABONOS`, RP-06): hay que anular antes los abonos.
+
+Permisos: `charge:create` y `charge:void`, solo ADMIN.
+
+---
+
+## `/api/todo`
+
+El día entero, **moneda por moneda**. Es el cierre de caja.
+
+La regla que manda aquí es que **nada se convierte**. En el resto de la API todo
+se puede leer llevado a una sola moneda, que sirve para comparar; para cerrar la
+caja no sirve, porque los bolívares y los dólares están en bolsillos distintos y
+se cuentan por separado. Cada cifra viene en la moneda en que se pactó o se pagó.
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/` | `?dia=YYYY-MM-DD` (por defecto hoy) — el informe completo |
+| POST | `/cierre` | `{dia, sobrante:{COP,USD,VES}, observacion}` — guarda lo contado |
+
+`GET /` devuelve:
+
+- `vieneDeAntes` — el sobrante del **último cierre anterior** a ese día. No el de
+  ayer exacto: si el domingo no se abrió, el lunes arranca con lo del sábado.
+- `ventas` — `vendido`, `contado`, `fiado` y el desglose `porProducto`. El
+  contado sale de `pagadoInicial`, que no cambia, así que el cierre de un día
+  pasado no se mueve cuando alguien abona una venta vieja.
+- `entradas` — `contado` + `cobrado` (abonos de clientes) = `recogido`.
+- `salidas` — `gastado` + `aProveedores` + `prestado`, con la lista de cada uno.
+- `queda` = recogido − salidas · `deberiaQuedar` = `vieneDeAntes` + `queda`.
+- `cierre` — lo contado, la observación y la `diferencia` contra lo calculado.
+
+Los gastos son los de siempre (`POST /api/gastos` con la `fecha` de ese día):
+no hay un segundo sitio donde guardarlos, porque partiría en dos el reporte del
+mes.
+
+`POST /cierre` es idempotente por día (upsert) y **no valida** lo contado contra
+lo calculado a propósito: si contó 20 mil de menos, eso es un dato, no un error
+que haya que impedir. Se guarda tal cual y la diferencia queda a la vista.
+
 ---
 
 ## `/api/pagos`

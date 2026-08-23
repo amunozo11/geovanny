@@ -7,12 +7,14 @@ import { api } from '../../lib/api';
 import { useMoneda } from '../moneda/contexto';
 import { SelectorCaja } from '../cajas/SelectorCaja';
 import { Aviso, Boton, Campo, Cargando, Seleccion, Tarjeta, Vacio } from '../../components/ui/base';
-import type { Operacion, Pago, Persona } from '../../lib/tipos';
+import { useAuth } from '../auth/AuthContext';
+import type { Cargo, Operacion, Pago, Persona } from '../../lib/tipos';
 
 interface Cuenta {
   persona: Persona;
   operaciones: Operacion[];
   pagos: Pago[];
+  cargos: Cargo[];
 }
 
 /**
@@ -25,7 +27,9 @@ interface Cuenta {
 export function Cuenta() {
   const { id } = useParams<{ id: string }>();
   const clienteDeQuery = useQueryClient();
+  const { puede } = useAuth();
   const [abriendoAbono, setAbriendoAbono] = useState(false);
+  const [abriendoCargo, setAbriendoCargo] = useState(false);
 
   const consulta = useQuery({
     queryKey: ['cuenta', id],
@@ -37,13 +41,14 @@ export function Cuenta() {
     return <Aviso tono="error">No se pudo cargar la cuenta.</Aviso>;
   }
 
-  const { persona, operaciones, pagos } = consulta.data;
+  const { persona, operaciones, pagos, cargos = [] } = consulta.data;
   const conSaldo = MONEDAS.filter((m) => Number(persona.saldos?.[m] ?? '0') !== 0);
   const debeAlgo = conSaldo.some((m) => D(persona.saldos[m]!).greaterThan(0));
 
   const movimientos = [
     ...operaciones.map((o) => ({ tipo: 'operacion' as const, fecha: o.fecha, dato: o })),
     ...pagos.map((p) => ({ tipo: 'pago' as const, fecha: p.fecha, dato: p })),
+    ...cargos.map((c) => ({ tipo: 'cargo' as const, fecha: c.fecha, dato: c })),
   ].sort((a, b) => b.fecha.localeCompare(a.fecha));
 
   return (
@@ -79,10 +84,23 @@ export function Cuenta() {
         </p>
       </Tarjeta>
 
-      {debeAlgo && !abriendoAbono && (
-        <Boton onClick={() => setAbriendoAbono(true)} className="w-full">
-          Registrar abono
-        </Boton>
+      {!abriendoAbono && !abriendoCargo && (
+        <div className="flex gap-2">
+          {debeAlgo && (
+            <Boton onClick={() => setAbriendoAbono(true)} className="flex-1">
+              Registrar abono
+            </Boton>
+          )}
+          {puede('charge:create') && (
+            <Boton
+              variante="secundario"
+              onClick={() => setAbriendoCargo(true)}
+              className="flex-1"
+            >
+              Prestar o cargar deuda
+            </Boton>
+          )}
+        </div>
       )}
 
       {abriendoAbono && (
@@ -96,6 +114,17 @@ export function Cuenta() {
         />
       )}
 
+      {abriendoCargo && (
+        <FormularioCargo
+          persona={persona}
+          onListo={() => {
+            setAbriendoCargo(false);
+            void clienteDeQuery.invalidateQueries();
+          }}
+          onCancelar={() => setAbriendoCargo(false)}
+        />
+      )}
+
       <Tarjeta titulo="Movimientos">
         {movimientos.length === 0 ? (
           <Vacio mensaje="Todavía no hay movimientos." />
@@ -104,8 +133,10 @@ export function Cuenta() {
             {movimientos.map((movimiento) =>
               movimiento.tipo === 'operacion' ? (
                 <FilaOperacion key={movimiento.dato.id} operacion={movimiento.dato} />
-              ) : (
+              ) : movimiento.tipo === 'pago' ? (
                 <FilaPago key={movimiento.dato.id} pago={movimiento.dato} />
+              ) : (
+                <FilaCargo key={movimiento.dato.id} cargo={movimiento.dato} />
               ),
             )}
           </ul>
@@ -292,6 +323,154 @@ function FormularioAbono({
             className="flex-1"
           >
             {registrar.isPending ? 'Guardando…' : 'Guardar abono'}
+          </Boton>
+        </div>
+      </div>
+    </Tarjeta>
+  );
+}
+
+const ETIQUETA_CARGO: Record<Cargo['tipo'], string> = {
+  PRESTAMO: 'Préstamo',
+  DEUDA: 'Deuda',
+  AJUSTE: 'Ajuste',
+};
+
+function FilaCargo({ cargo }: { cargo: Cargo }) {
+  const pendiente = D(cargo.saldo).greaterThan(0);
+
+  return (
+    <li className="py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+            {ETIQUETA_CARGO[cargo.tipo]} {cargo.numero} ·{' '}
+            {new Date(cargo.fecha).toLocaleDateString('es-CO')}
+          </p>
+          <p className="truncate text-xs opacity-60">
+            {cargo.concepto}
+            {cargo.salioDeCaja && ' · salió de la caja'}
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="tabular">{formatMoney(money(cargo.importe.monto, cargo.moneda))}</p>
+          {pendiente ? (
+            <p className="tabular text-xs text-amber-600 dark:text-amber-400">
+              debe {formatMoney(money(cargo.saldo, cargo.moneda))}
+            </p>
+          ) : (
+            <p className="text-xs text-emerald-600 dark:text-emerald-400">pagado</p>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+/**
+ * Cargar una deuda que no viene de una venta.
+ *
+ * La pregunta que de verdad importa es si salió plata del cajón: prestarle
+ * 100 dólares a alguien vacía la caja, mientras que anotar una deuda vieja que
+ * ya existía no mueve nada. Se pregunta explícitamente porque el sistema no
+ * puede adivinarlo, y equivocarse descuadra el cierre del día.
+ */
+function FormularioCargo({
+  persona,
+  onListo,
+  onCancelar,
+}: {
+  persona: Persona;
+  onListo: () => void;
+  onCancelar: () => void;
+}) {
+  const [tipo, setTipo] = useState<Cargo['tipo']>('PRESTAMO');
+  const [concepto, setConcepto] = useState('');
+  const [monto, setMonto] = useState('');
+  const [moneda, setMoneda] = useState<Moneda>('VES');
+  const [cajaId, setCajaId] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  // Prestar entrega dinero; anotar una deuda vieja o corregir un saldo, no.
+  const salioDeCaja = tipo === 'PRESTAMO';
+
+  const registrar = useMutation({
+    mutationFn: () =>
+      api('/cargos', {
+        method: 'POST',
+        body: JSON.stringify({
+          personaId: persona.id,
+          tipo,
+          concepto,
+          monto,
+          moneda,
+          salioDeCaja,
+          cajaId: salioDeCaja ? cajaId || null : null,
+        }),
+      }),
+    onSuccess: onListo,
+    onError: (e: ApiError) => setError(e.message),
+  });
+
+  return (
+    <Tarjeta titulo="Prestar o cargar una deuda">
+      <div className="space-y-3">
+        <Seleccion
+          etiqueta="¿Qué es?"
+          valor={tipo}
+          onChange={setTipo}
+          opciones={[
+            { valor: 'PRESTAMO', texto: 'Préstamo — le entregas plata ahora' },
+            { valor: 'DEUDA', texto: 'Deuda pendiente — ya la debía, solo la anotas' },
+            { valor: 'AJUSTE', texto: 'Ajuste — corregir un saldo mal registrado' },
+          ]}
+        />
+
+        <Campo
+          etiqueta="¿Por qué te queda debiendo?"
+          valor={concepto}
+          onChange={setConcepto}
+          placeholder={tipo === 'PRESTAMO' ? 'Préstamo para el flete' : 'Deuda del cuaderno viejo'}
+          autoFocus
+        />
+
+        <div className="grid grid-cols-2 gap-3">
+          <Campo etiqueta="Cuánto" valor={monto} onChange={setMonto} numerico />
+          <Seleccion
+            etiqueta="Moneda"
+            valor={moneda}
+            onChange={setMoneda}
+            opciones={MONEDAS.map((m) => ({ valor: m, texto: m }))}
+          />
+        </div>
+
+        {salioDeCaja ? (
+          <>
+            <SelectorCaja moneda={moneda} valor={cajaId} onChange={setCajaId} etiqueta="¿De dónde sale la plata?" />
+            <Aviso tono="atencion">
+              Esta plata sale de la caja hoy y aparecerá en el cierre del día como préstamo
+              entregado.
+            </Aviso>
+          </>
+        ) : (
+          <Aviso tono="info">
+            No mueve dinero: solo sube lo que {persona.nombre} te debe. Úsalo para pasar al sistema
+            una deuda que ya existía.
+          </Aviso>
+        )}
+
+        {error && <Aviso tono="error">{error}</Aviso>}
+
+        <div className="flex gap-2">
+          <Boton variante="secundario" onClick={onCancelar} className="flex-1">
+            Cancelar
+          </Boton>
+          <Boton
+            onClick={() => registrar.mutate()}
+            disabled={!concepto.trim() || !monto || registrar.isPending}
+            className="flex-1"
+          >
+            {registrar.isPending ? 'Guardando…' : 'Guardar'}
           </Boton>
         </div>
       </div>

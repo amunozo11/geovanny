@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { PersonaModel, TIPOS_PERSONA } from '../models/persona.js';
 import { OperacionModel } from '../models/operacion.js';
 import { PagoModel } from '../models/pago.js';
+import { CargoModel } from '../models/cargo.js';
 import { requireAuth, requirePermission } from '../middleware/auth.js';
 import { NotFoundError } from '../lib/errors.js';
 
@@ -53,10 +54,13 @@ personasRouter.get('/:id/cuenta', async (req, res) => {
   if (!persona) throw new NotFoundError('No se encontró la persona.');
 
   const personaId = new Types.ObjectId(String(req.params.id));
-  const [operaciones, pagos] = await Promise.all([
+  const [operaciones, pagos, cargos] = await Promise.all([
     OperacionModel.find({ personaId, estado: 'ACTIVA' }).sort({ fecha: -1 }).limit(100),
     PagoModel.find({ personaId, estado: 'ACTIVO' }).sort({ fecha: -1 }).limit(100),
+    // Préstamos y deudas sueltas: para quien debe son un movimiento más de su
+    // cuenta, así que viajan en la misma respuesta.
+    CargoModel.find({ personaId, estado: 'ACTIVO' }).sort({ fecha: -1 }).limit(100),
   ]);
 
-  res.json({ data: { persona, operaciones, pagos } });
+  res.json({ data: { persona, operaciones, pagos, cargos } });
 });

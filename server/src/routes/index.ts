@@ -8,10 +8,12 @@ import { personasRouter } from './personas.js';
 import { operacionesRouter } from './operaciones.js';
 import { ventasTotalesRouter } from './ventasTotales.js';
 import { pagosRouter } from './pagos.js';
+import { cargosRouter } from './cargos.js';
 import { gastosRouter } from './gastos.js';
 import { cajasRouter } from './cajas.js';
 import { diasRouter } from './dias.js';
 import { resumenRouter } from './resumen.js';
+import { todoRouter } from './todo.js';
 
 /** Router raíz de la API. */
 export const apiRouter = Router();
@@ -26,7 +28,9 @@ apiRouter.use('/personas', personasRouter);
 apiRouter.use('/operaciones', operacionesRouter);
 apiRouter.use('/ventas-totales', ventasTotalesRouter);
 apiRouter.use('/pagos', pagosRouter);
+apiRouter.use('/cargos', cargosRouter);
 apiRouter.use('/gastos', gastosRouter);
 apiRouter.use('/cajas', cajasRouter);
 apiRouter.use('/dias', diasRouter);
 apiRouter.use('/resumen', resumenRouter);
+apiRouter.use('/todo', todoRouter);

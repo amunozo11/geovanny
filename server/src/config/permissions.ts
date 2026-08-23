@@ -16,6 +16,9 @@ export const PERMISSIONS = [
   'purchase:void',
   'payment:create',
   'payment:void',
+  /** Cargar una deuda a mano: préstamo o deuda vieja. Solo ADMIN. */
+  'charge:create',
+  'charge:void',
   'supplier_payment:create',
   'receivable:read',
   'payable:read',

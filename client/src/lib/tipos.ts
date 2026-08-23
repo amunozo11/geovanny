@@ -165,3 +165,76 @@ export interface ResultadoLote {
   guardadas: { indice: number; id: string; numero: string }[];
   fallidas: { indice: number; codigo: string; mensaje: string }[];
 }
+
+/** Deuda que no viene de una venta: préstamo o cargo manual. */
+export interface Cargo {
+  id: string;
+  _id: string;
+  numero: string;
+  personaNombre: string;
+  tipo: 'PRESTAMO' | 'DEUDA' | 'AJUSTE';
+  concepto: string;
+  importe: Importe;
+  moneda: Moneda;
+  saldo: string;
+  salioDeCaja: boolean;
+  fecha: string;
+  nota: string | null;
+  estado: 'ACTIVO' | 'ANULADO';
+}
+
+/** Bolsa de dinero por moneda, sin convertir nada. */
+export type PorMoneda = Record<Moneda, string>;
+
+/** El informe del módulo TODO: el día entero, moneda por moneda. */
+export interface InformeTodo {
+  dia: string;
+  esHoy: boolean;
+  vieneDeAntes: {
+    dia: string | null;
+    sobrante: PorMoneda;
+    observacion: string | null;
+  };
+  ventas: {
+    registros: number;
+    vendido: PorMoneda;
+    contado: PorMoneda;
+    fiado: PorMoneda;
+    porProducto: {
+      nombre: string;
+      unidad: string;
+      cantidad: string;
+      registros: number;
+      vendido: PorMoneda;
+    }[];
+  };
+  entradas: { contado: PorMoneda; cobrado: PorMoneda; recogido: PorMoneda };
+  salidas: {
+    gastado: PorMoneda;
+    aProveedores: PorMoneda;
+    prestado: PorMoneda;
+    total: PorMoneda;
+    gastos: {
+      id: string;
+      numero: string;
+      hora: string;
+      categoria: string;
+      descripcion: string;
+      monto: string;
+      moneda: Moneda;
+    }[];
+    pagos: { id: string; numero: string; hora: string; persona: string; monto: string; moneda: Moneda }[];
+    prestamos: {
+      id: string;
+      numero: string;
+      hora: string;
+      persona: string;
+      concepto: string;
+      monto: string;
+      moneda: Moneda;
+    }[];
+  };
+  queda: PorMoneda;
+  deberiaQuedar: PorMoneda;
+  cierre: { observacion: string; sobrante: PorMoneda; diferencia: PorMoneda } | null;
+}

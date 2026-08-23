@@ -2,6 +2,7 @@ import mongoose, { Types } from 'mongoose';
 import { D, crearImporte, type Moneda, type TasaDelDia } from '@geovanny/shared';
 import { PagoModel, type Direccion } from '../models/pago.js';
 import { OperacionModel } from '../models/operacion.js';
+import { CargoModel } from '../models/cargo.js';
 import { PersonaModel } from '../models/persona.js';
 import { siguienteNumero } from '../models/contador.js';
 import { BusinessRuleError, NotFoundError } from '../lib/errors.js';
@@ -101,6 +102,45 @@ export async function registrarPago(entrada: RegistrarPago) {
         restante = restante.minus(aplicar);
       }
 
+      /**
+       * Lo que sobre después de las ventas va a las deudas sueltas: préstamos y
+       * cargos manuales. Sin esto, abonar un préstamo dejaría el abono entero
+       * marcado como "a favor" —cuando en realidad pagó algo— y el cargo se
+       * quedaría para siempre en pantalla como pendiente.
+       */
+      const asignacionesCargo: { cargoId: Types.ObjectId; numero: string; monto: string }[] = [];
+
+      if (restante.greaterThan(0)) {
+        const cargosPendientes = await CargoModel.find({
+          personaId: persona._id,
+          moneda: aplicaA,
+          estado: 'ACTIVO',
+          saldo: { $ne: '0' },
+        })
+          .sort({ fecha: 1 })
+          .session(session);
+
+        for (const cargo of cargosPendientes) {
+          if (!restante.greaterThan(0)) break;
+
+          const saldo = D(cargo.saldo);
+          const aplicar = restante.greaterThan(saldo) ? saldo : restante;
+
+          await CargoModel.updateOne(
+            { _id: cargo._id },
+            { $set: { saldo: saldo.minus(aplicar).toString() } },
+            { session },
+          );
+
+          asignacionesCargo.push({
+            cargoId: cargo._id,
+            numero: cargo.numero,
+            monto: aplicar.toString(),
+          });
+          restante = restante.minus(aplicar);
+        }
+      }
+
       const numero = await siguienteNumero(entrada.direccion === 'ENTRA' ? 'P' : 'A', session);
 
       const [pago] = await PagoModel.create(
@@ -116,6 +156,7 @@ export async function registrarPago(entrada: RegistrarPago) {
             montoAplicado: montoAplicado.toString(),
             metodo: entrada.metodo ?? 'EFECTIVO',
             asignaciones,
+            asignacionesCargo,
             // Lo que sobra queda a favor: no se pierde ni se rechaza (CN-17).
             aFavor: restante.toString(),
             nota: entrada.nota ?? null,
@@ -183,6 +224,18 @@ export async function anularPago(id: string, motivo: string) {
               saldo: D(operacion.saldo).plus(D(asignacion.monto)).toString(),
             },
           },
+          { session },
+        );
+      }
+
+      // Y a cada cargo suelto lo suyo.
+      for (const asignacion of pago.asignacionesCargo ?? []) {
+        const cargo = await CargoModel.findById(asignacion.cargoId).session(session);
+        if (!cargo) continue;
+
+        await CargoModel.updateOne(
+          { _id: cargo._id },
+          { $set: { saldo: D(cargo.saldo).plus(D(asignacion.monto)).toString() } },
           { session },
         );
       }

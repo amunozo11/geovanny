@@ -7,6 +7,11 @@ import type { Persona } from '../../lib/tipos';
 
 const OPCIONES = [
   {
+    a: '/todo',
+    titulo: 'Todo',
+    texto: 'El día completo: lo vendido, lo recogido, los gastos y el cierre',
+  },
+  {
     a: '/ventas-totales',
     titulo: 'Ventas totales',
     texto: 'Lo del mostrador: producto, cantidad y precio, sin cliente',

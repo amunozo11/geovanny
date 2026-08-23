@@ -32,6 +32,12 @@ export interface Pago {
   metodo: string;
   /** Reparto sobre las operaciones pendientes, de la más antigua a la más nueva. */
   asignaciones: { operacionId: Types.ObjectId; numero: string; monto: string }[];
+  /**
+   * Reparto sobre las deudas que no vienen de una venta (préstamos y cargos
+   * manuales). Van aparte porque apuntan a otra colección, no porque sean otra
+   * cosa: para quien abona es la misma deuda.
+   */
+  asignacionesCargo: { cargoId: Types.ObjectId; numero: string; monto: string }[];
   /** Sobrante que queda como saldo a favor de la persona. */
   aFavor: string;
   nota: string | null;
@@ -56,6 +62,19 @@ const pagoSchema = new Schema<Pago>(
         new Schema(
           {
             operacionId: { type: Schema.Types.ObjectId, ref: 'Operacion' },
+            numero: String,
+            monto: String,
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
+    asignacionesCargo: {
+      type: [
+        new Schema(
+          {
+            cargoId: { type: Schema.Types.ObjectId, ref: 'Cargo' },
             numero: String,
             monto: String,
           },
