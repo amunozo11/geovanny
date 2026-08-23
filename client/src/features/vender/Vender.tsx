@@ -36,7 +36,11 @@ export function Vender() {
   const [elegido, setElegido] = useState<Producto | null>(null);
   const [cantidad, setCantidad] = useState('');
   const [precio, setPrecio] = useState('');
-  const [formaPago, setFormaPago] = useState<'CONTADO' | 'FIADO' | 'PARCIAL'>('CONTADO');
+  // Fiado por defecto: la venta con cliente de esta pantalla casi siempre queda
+  // debiendo —lo de contado va por Ventas totales, en el mostrador—, y arrancar
+  // en "Contado" hacía que una venta fiada se registrara como cobrada si a
+  // alguien se le pasaba tocar el botón.
+  const [formaPago, setFormaPago] = useState<'CONTADO' | 'FIADO' | 'PARCIAL'>('FIADO');
   const [abono, setAbono] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [forzar, setForzar] = useState(false);
