@@ -17,6 +17,21 @@ export type TipoOperacion = (typeof TIPOS_OPERACION)[number];
 export const FORMAS_PAGO = ['CONTADO', 'FIADO', 'PARCIAL'] as const;
 export type FormaPago = (typeof FORMAS_PAGO)[number];
 
+/**
+ * Por dónde entró la operación.
+ *
+ * `CLIENTE` es la venta de siempre: hay alguien con nombre, puede quedar
+ * debiendo y tiene cuenta corriente. `DIRECTA` es la venta de mostrador —lo que
+ * él llama *venta total*—: se despacha, se cobra en el acto y nadie queda
+ * debiendo, así que no hace falta abrir una ficha de cliente para registrarla.
+ *
+ * Es el mismo documento porque es la misma venta: descuenta inventario, entra
+ * en caja y cuenta en el cierre del día igual que cualquier otra. Solo cambia
+ * si hay o no una persona detrás.
+ */
+export const CANALES = ['CLIENTE', 'DIRECTA'] as const;
+export type Canal = (typeof CANALES)[number];
+
 export interface ItemOperacion {
   productoId: Types.ObjectId;
   nombre: string;
@@ -31,7 +46,9 @@ export interface ItemOperacion {
 export interface Operacion {
   numero: string;
   tipo: TipoOperacion;
-  personaId: Types.ObjectId;
+  canal: Canal;
+  /** Nulo en las ventas directas: no hay cliente al que cargarle nada. */
+  personaId: Types.ObjectId | null;
   personaNombre: string;
   fecha: Date;
   items: ItemOperacion[];
@@ -75,7 +92,8 @@ const operacionSchema = new Schema<Operacion>(
   {
     numero: { type: String, required: true, unique: true },
     tipo: { type: String, enum: TIPOS_OPERACION, required: true },
-    personaId: { type: Schema.Types.ObjectId, ref: 'Persona', required: true },
+    canal: { type: String, enum: CANALES, default: 'CLIENTE' },
+    personaId: { type: Schema.Types.ObjectId, ref: 'Persona', default: null },
     personaNombre: { type: String, required: true },
     fecha: { type: Date, default: () => new Date() },
     items: { type: [itemSchema], default: [] },
@@ -100,6 +118,7 @@ const operacionSchema = new Schema<Operacion>(
 );
 
 operacionSchema.index({ tipo: 1, fecha: -1 });
+operacionSchema.index({ tipo: 1, canal: 1, estado: 1, fecha: -1 });
 operacionSchema.index({ personaId: 1, fecha: -1 });
 operacionSchema.index({ tipo: 1, estado: 1, saldo: 1 });
 operacionSchema.index({ 'items.productoId': 1, fecha: -1 });

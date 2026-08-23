@@ -8,7 +8,7 @@ import {
   type Moneda,
   type TasaDelDia,
 } from '@geovanny/shared';
-import { OperacionModel, type FormaPago, type TipoOperacion } from '../models/operacion.js';
+import { OperacionModel, type Canal, type FormaPago, type TipoOperacion } from '../models/operacion.js';
 import { ProductoModel } from '../models/producto.js';
 import { PersonaModel } from '../models/persona.js';
 import { MovimientoModel } from '../models/movimiento.js';
@@ -25,7 +25,12 @@ export interface ItemEntrada {
 
 export interface CrearOperacion {
   tipo: TipoOperacion;
-  personaId: string;
+  /** Nulo solo en ventas directas (mostrador): no hay cliente al que cargarle nada. */
+  personaId?: string | null;
+  /** `DIRECTA` = venta total de mostrador, sin cliente. Por defecto, `CLIENTE`. */
+  canal?: Canal;
+  /** Nombre que se guarda en una venta directa, si se quiere anotar algo. */
+  descripcion?: string | null;
   fecha?: string;
   moneda: Moneda;
   items: ItemEntrada[];
@@ -53,9 +58,31 @@ export async function crearOperacion(entrada: CrearOperacion) {
 
   const tasa: TasaDelDia = await tasaVigente();
   const esVenta = entrada.tipo === 'VENTA';
+  const canal: Canal = entrada.canal ?? 'CLIENTE';
+  const esDirecta = canal === 'DIRECTA';
 
-  const persona = await PersonaModel.findById(entrada.personaId);
-  if (!persona) throw new NotFoundError('No se encontró el cliente o proveedor.');
+  if (esDirecta && !esVenta) {
+    throw new BusinessRuleError(
+      'COMPRA_SIN_PROVEEDOR',
+      'Un viaje siempre tiene proveedor: solo las ventas pueden ser directas.',
+    );
+  }
+
+  // Sin cliente no hay a quién cobrarle después, así que una venta directa se
+  // paga en el acto. Permitir fiarla crearía una deuda sin dueño.
+  if (esDirecta && entrada.formaPago !== 'CONTADO') {
+    throw new BusinessRuleError(
+      'DIRECTA_NO_FIADA',
+      'Una venta total se cobra en el momento. Si el cliente queda debiendo, regístrala como venta a un cliente.',
+    );
+  }
+
+  const persona = esDirecta ? null : await PersonaModel.findById(entrada.personaId);
+  if (!esDirecta && !persona) throw new NotFoundError('No se encontró el cliente o proveedor.');
+
+  const nombreEnLaVenta = persona
+    ? persona.nombre
+    : (entrada.descripcion?.trim() || 'Venta total');
 
   const productos = await ProductoModel.find({
     _id: { $in: entrada.items.map((i) => new Types.ObjectId(i.productoId)) },
@@ -160,8 +187,9 @@ export async function crearOperacion(entrada: CrearOperacion) {
           {
             numero,
             tipo: entrada.tipo,
-            personaId: persona._id,
-            personaNombre: persona.nombre,
+            canal,
+            personaId: persona?._id ?? null,
+            personaNombre: nombreEnLaVenta,
             fecha: entrada.fecha ? new Date(entrada.fecha) : new Date(),
             items: detalle,
             cargue,
@@ -242,7 +270,9 @@ export async function crearOperacion(entrada: CrearOperacion) {
             moneda: entrada.moneda,
             monto: esVenta ? pagado.toString() : pagado.negated().toString(),
             tipo: esVenta ? 'INGRESO' : 'EGRESO',
-            concepto: esVenta ? `Venta ${numero} · ${persona.nombre}` : `Viaje ${numero} · ${persona.nombre}`,
+            concepto: esVenta
+              ? `Venta ${numero} · ${nombreEnLaVenta}`
+              : `Viaje ${numero} · ${nombreEnLaVenta}`,
             refTipo: 'OPERACION',
             refId: creada._id,
             refNumero: numero,
@@ -253,7 +283,7 @@ export async function crearOperacion(entrada: CrearOperacion) {
       }
 
       // Deuda: sube el saldo de la persona en la moneda de la operación.
-      if (saldo.greaterThan(0)) {
+      if (persona && saldo.greaterThan(0)) {
         const actual = D(persona.saldos[entrada.moneda] ?? '0');
         await PersonaModel.updateOne(
           { _id: persona._id },
@@ -328,7 +358,7 @@ export async function anularOperacion(id: string, motivo: string, usuarioId?: st
         );
       }
 
-      if (D(operacion.saldo).greaterThan(0)) {
+      if (operacion.personaId && D(operacion.saldo).greaterThan(0)) {
         const persona = await PersonaModel.findById(operacion.personaId).session(session);
         if (persona) {
           const actual = D(persona.saldos[operacion.moneda] ?? '0');
@@ -379,6 +409,7 @@ export async function anularOperacion(id: string, motivo: string, usuarioId?: st
 
 export async function listarOperaciones(filtros: {
   tipo?: TipoOperacion;
+  canal?: Canal;
   personaId?: string;
   desde?: string;
   hasta?: string;
@@ -387,6 +418,7 @@ export async function listarOperaciones(filtros: {
 }) {
   const consulta: Record<string, unknown> = { estado: 'ACTIVA' };
   if (filtros.tipo) consulta.tipo = filtros.tipo;
+  if (filtros.canal) consulta.canal = filtros.canal;
   if (filtros.personaId) consulta.personaId = new Types.ObjectId(filtros.personaId);
   if (filtros.soloPendientes) consulta.saldo = { $ne: '0' };
   if (filtros.desde || filtros.hasta) {

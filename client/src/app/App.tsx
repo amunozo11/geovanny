@@ -5,6 +5,7 @@ import { MonedaProvider } from '../features/moneda/MonedaContext';
 import { Layout } from './Layout';
 import { Inicio } from '../features/inicio/Inicio';
 import { Vender } from '../features/vender/Vender';
+import { VentasTotales } from '../features/ventas/VentasTotales';
 import { Clientes } from '../features/clientes/Clientes';
 import { Cuenta } from '../features/clientes/Cuenta';
 import { Inventario } from '../features/inventario/Inventario';
@@ -37,6 +38,7 @@ export function App() {
           <Route element={<Layout />}>
             <Route index element={<Inicio />} />
             <Route path="vender" element={<Vender />} />
+            <Route path="ventas-totales" element={<VentasTotales />} />
             <Route path="clientes" element={<Clientes />} />
             <Route path="clientes/:id" element={<Cuenta />} />
             <Route path="proveedores/:id" element={<Cuenta />} />

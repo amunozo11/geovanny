@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { MONEDAS } from '@geovanny/shared';
 import { requireAuth, requirePermission } from '../middleware/auth.js';
 import { OperacionModel } from '../models/operacion.js';
-import { ForbiddenError, NotFoundError } from '../lib/errors.js';
+import { BusinessRuleError, ForbiddenError, NotFoundError } from '../lib/errors.js';
 import { can } from '../config/permissions.js';
 import * as operaciones from '../services/operaciones.service.js';
 
@@ -15,7 +15,8 @@ const numeroTexto = z.string().regex(/^\d+(\.\d+)?$/, 'Escribe un número');
 
 const crearSchema = z.object({
   tipo: z.enum(['VENTA', 'COMPRA']),
-  personaId: z.string().min(1, 'Elige el cliente o proveedor'),
+  personaId: z.string().min(1, 'Elige el cliente o proveedor').nullish(),
+  canal: z.enum(['CLIENTE', 'DIRECTA']).default('CLIENTE'),
   moneda: z.enum(MONEDAS),
   items: z
     .array(
@@ -38,6 +39,7 @@ const crearSchema = z.object({
 operacionesRouter.get('/', async (req, res) => {
   const lista = await operaciones.listarOperaciones({
     tipo: req.query.tipo as 'VENTA' | 'COMPRA' | undefined,
+    canal: req.query.canal as 'CLIENTE' | 'DIRECTA' | undefined,
     personaId: req.query.personaId as string | undefined,
     desde: req.query.desde as string | undefined,
     hasta: req.query.hasta as string | undefined,
@@ -55,6 +57,12 @@ operacionesRouter.get('/:id', async (req, res) => {
 
 operacionesRouter.post('/', async (req, res) => {
   const entrada = crearSchema.parse(req.body);
+
+  // Solo la venta de mostrador puede ir sin persona; un viaje siempre tiene
+  // proveedor y una venta a crédito, alguien a quien cobrarle.
+  if (!entrada.personaId && entrada.canal !== 'DIRECTA') {
+    throw new BusinessRuleError('SIN_PERSONA', 'Elige el cliente o el proveedor.');
+  }
 
   // Vender y comprar exigen permisos distintos.
   const permiso = entrada.tipo === 'VENTA' ? 'sale:create' : 'purchase:create';

@@ -63,14 +63,32 @@ deduce de ahí.
 | Método | Ruta | Qué hace |
 |---|---|---|
 | GET | `/` | `?q=` para buscar por nombre |
-| POST | `/` | `{nombre, unidad, precioVenta?, monedaVenta?}` |
+| POST | `/` | `{nombre, unidad, precioVenta?, monedaVenta?, stockMinimo?, cantidadInicial?, costoUnitario?, monedaCosto?}` |
 | PATCH | `/:id` | **No** toca el stock (RC-10) |
-| DELETE | `/:id` | Lo desactiva, no lo borra |
-| POST | `/:id/ajuste` | `{cantidad, tipo, motivo}` — el motivo es obligatorio |
+| DELETE | `/:id` | Lo borra si nunca se movió; si tiene historial, lo oculta |
+| POST | `/:id/ajuste` | `{cantidad \| nuevaCantidad, tipo, motivo}` — el motivo es obligatorio |
 | GET | `/:id/movimientos` | Historial de por qué el stock es el que es |
 | GET | `/verificar-stock` | Recalcula desde los movimientos y avisa si algo no cuadra |
 
 `tipo` del ajuste: `MERMA` · `AJUSTE` · `DEVOLUCION`.
+
+**El catálogo empieza vacío**: no se siembra ningún producto de ejemplo, porque
+cada negocio maneja lo suyo.
+
+`cantidadInicial` no escribe el stock a mano: crea un movimiento de `AJUSTE` con
+el motivo "existencia inicial", así que la regla RC-10 se mantiene. El
+`costoUnitario` se declara en la moneda que diga `monedaCosto` y se guarda
+convertido a COP, la moneda funcional (RP-01); sin él, el sistema creería que la
+mercancía salió gratis y la utilidad saldría inflada.
+
+`nuevaCantidad` es la alternativa a `cantidad` en el ajuste: se dice cuánto hay
+de verdad tras contar y el servidor calcula la diferencia. Evita la resta mental,
+que es donde se cometen los errores.
+
+Un `DELETE` sobre un producto sin movimientos y con stock cero lo borra de
+verdad y libera su nombre; si ya se vendió o se compró alguna vez, solo se
+desactiva, porque borrarlo dejaría sin nombre las operaciones donde aparece.
+Volver a crearlo con el mismo nombre lo reactiva con su historial.
 
 ---
 
@@ -95,7 +113,7 @@ Ventas y compras (viajes).
 
 | Método | Ruta | Qué hace |
 |---|---|---|
-| GET | `/` | `?tipo=&personaId=&desde=&hasta=&pendientes=true&limite=` |
+| GET | `/` | `?tipo=&canal=&personaId=&desde=&hasta=&pendientes=true&limite=` |
 | GET | `/:id` | |
 | POST | `/` | Crear. `?forzar=true` permite vender sin existencias |
 | POST | `/:id/anular` | `{motivo}` — revierte inventario y deuda. No hay DELETE ni edición |
@@ -105,7 +123,8 @@ Ventas y compras (viajes).
 ```jsonc
 {
   "tipo": "VENTA",                    // VENTA | COMPRA
-  "personaId": "…",
+  "canal": "CLIENTE",                 // CLIENTE | DIRECTA (mostrador, sin persona)
+  "personaId": "…",                   // nulo solo si canal es DIRECTA
   "moneda": "VES",                    // en qué se pacta la operación
   "items": [
     { "productoId": "…", "cantidad": "20", "precio": "35000" }
@@ -127,7 +146,41 @@ En las compras, el cargue se reparte entre los productos según su valor y de ah
 sale el costo real por unidad. En las ventas se congelan el costo y la utilidad.
 
 Errores propios: `SIN_STOCK` (422), `SIN_TASA` (422 — hay que registrar la tasa
-antes de operar), `PAGO_MAYOR`, `CANTIDAD_INVALIDA`, `SIN_ITEMS`.
+antes de operar), `PAGO_MAYOR`, `CANTIDAD_INVALIDA`, `SIN_ITEMS`, `SIN_PERSONA`,
+`DIRECTA_NO_FIADA`.
+
+---
+
+## `/api/ventas-totales`
+
+Las ventas de mostrador: se despacha, se cobra en el acto y no hay cliente al que
+cargarle nada.
+
+Por dentro **son operaciones normales** con `canal: "DIRECTA"`, así que descuentan
+inventario, entran en caja y cuentan en el inicio y en el cierre del día igual que
+cualquier venta. Tienen su propio endpoint porque se registran y se leen distinto:
+producto por producto, y con un corte del día en las tres monedas.
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/` | `?dia=YYYY-MM-DD` (por defecto hoy) — corte del día |
+| POST | `/` | Un registro: `{productoId, cantidad, precio, moneda, cajaId?, fecha?, forzar?}` |
+| POST | `/lote` | `{lineas: [...]}` — hasta 50 de una vez |
+| POST | `/:id/anular` | `{motivo?}` — devuelve la mercancía y saca la plata de la caja |
+
+`POST /lote` guarda **cada línea por separado**, con su propia transacción, y
+responde `{guardadas: [{indice, id, numero}], fallidas: [{indice, codigo, mensaje}]}`.
+Si la tercera falla por falta de existencias, las dos primeras siguen guardadas:
+deshacerlas todas obligaría a volver a teclearlas, que es justo lo que este
+módulo viene a evitar.
+
+`forzar: true` registra aunque no haya existencias, igual que `?forzar=true` en
+las ventas normales (RP-14).
+
+`GET /` devuelve los totales del día —cuántos registros, cuántas unidades y el
+equivalente en COP, USD y VES—, el desglose por producto y la lista registro por
+registro. Los totales usan el equivalente **congelado** de cada venta, así que el
+corte de un día pasado no se mueve aunque hoy la tasa sea otra (RC-03).
 
 ---
 

@@ -3,7 +3,6 @@ import { connectDatabase, disconnectDatabase } from '../lib/db.js';
 import { logger } from '../lib/logger.js';
 import { UserModel } from '../models/User.js';
 import { CatalogoModel } from '../models/catalogos.js';
-import { ProductoModel } from '../models/producto.js';
 import { createUser } from '../services/auth.service.js';
 import { actualizarDesdeApi, hayTasa, registrarTasa } from '../services/tasas.service.js';
 import { CajaModel } from '../models/caja.js';
@@ -33,14 +32,14 @@ const CATEGORIAS_GASTO = [
 
 const METODOS_PAGO = ['EFECTIVO', 'TRANSFERENCIA', 'PAGO MOVIL', 'BANCO', 'OTRO'];
 
-/** Productos que aparecen en su archivo. Se crean vacíos: el stock real entra con las compras. */
-const PRODUCTOS = [
-  { nombre: 'PAPA', unidad: 'BULTO' },
-  { nombre: 'CEBOLLA ROJA', unidad: 'BULTO' },
-  { nombre: 'CEBOLLA BLANCA', unidad: 'CAJA' },
-  { nombre: 'AJO', unidad: 'CAJA' },
-  { nombre: 'NARANJA', unidad: 'CAJA' },
-];
+/**
+ * Los productos NO se siembran.
+ *
+ * Cada negocio maneja lo suyo, y arrancar con una lista de ejemplo obliga a
+ * borrar cosas que nunca se pidieron —naranjas que no se venden— antes de poder
+ * usar el sistema. El catálogo se crea desde la pantalla de Inventario, vacío y
+ * desde cero.
+ */
 
 async function sembrarCatalogos(): Promise<void> {
   const entradas = [
@@ -72,17 +71,6 @@ async function sembrarCatalogos(): Promise<void> {
     );
   }
   logger.info({ cantidad: entradas.length }, 'Catálogos listos');
-}
-
-async function sembrarProductos(): Promise<void> {
-  for (const producto of PRODUCTOS) {
-    await ProductoModel.updateOne(
-      { nombre: producto.nombre },
-      { $setOnInsert: producto },
-      { upsert: true },
-    );
-  }
-  logger.info({ cantidad: PRODUCTOS.length }, 'Productos listos');
 }
 
 /**
@@ -195,7 +183,6 @@ async function sembrarAdmin(): Promise<void> {
 export async function sembrar(): Promise<void> {
   await sembrarAdmin();
   await sembrarCatalogos();
-  await sembrarProductos();
   await sembrarCajas();
   await sembrarTasa();
   await migrarPagadoInicial();

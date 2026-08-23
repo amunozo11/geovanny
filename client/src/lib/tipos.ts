@@ -39,6 +39,8 @@ export interface Operacion {
   _id: string;
   numero: string;
   tipo: 'VENTA' | 'COMPRA';
+  /** `DIRECTA` = venta total de mostrador, sin cliente detrás. */
+  canal?: 'CLIENTE' | 'DIRECTA';
   personaNombre: string;
   fecha: string;
   items: ItemOperacion[];
@@ -122,4 +124,39 @@ export interface MovimientoCaja {
   concepto: string;
   motivo: string | null;
   fecha: string;
+}
+
+/** Lo que devuelve el apartado de ventas totales para un día. */
+export interface VentaTotalRegistrada {
+  id: string;
+  numero: string;
+  hora: string;
+  fecha: string;
+  nota: string | null;
+  items: { nombre: string; unidad: string; cantidad: string; precio: string; subtotal: string }[];
+  moneda: Moneda;
+  total: Importe;
+}
+
+export interface CorteVentasTotales {
+  dia: string;
+  esHoy: boolean;
+  totales: {
+    registros: number;
+    unidades: string;
+    porMoneda: Record<Moneda, string>;
+  };
+  porProducto: {
+    nombre: string;
+    unidad: string;
+    cantidad: string;
+    totalPorMoneda: Record<Moneda, string>;
+  }[];
+  ventas: VentaTotalRegistrada[];
+}
+
+/** Resultado de guardar varias ventas totales de una vez. */
+export interface ResultadoLote {
+  guardadas: { indice: number; id: string; numero: string }[];
+  fallidas: { indice: number; codigo: string; mensaje: string }[];
 }

@@ -79,8 +79,9 @@ en bolívares, son dos cuentas distintas, como en el cuaderno.
 |---|---|
 | **Inicio** | Cuánto debes contra cuánto te deben, ventas del día, ganancia del mes, inventario y quién te debe |
 | **Vender** | Cliente, productos, cómo paga, guardar. En una sola pantalla |
+| **Ventas totales** | Lo del mostrador, sin cliente: se toca el producto, se pone cantidad y precio, y se va guardando uno a uno o todos de golpe. Al cerrar, cuánto salió y a cuánto equivale en dólares y en bolívares |
 | **Clientes** | Quién debe y cuánto; al entrar, su cuenta completa y el botón de abonar |
-| **Inventario** | Existencias, costo real por bulto, mermas y ajustes |
+| **Inventario** | Crear, editar y quitar productos —el catálogo empieza vacío—, existencias, costo real por bulto, conteos y mermas |
 | **Por días** | Todo lo que se registró cada día, en orden y con sus totales |
 | **Cajas** | Dónde está el dinero: efectivo por moneda, banco, pago móvil. Conteo y cambio de divisa |
 | **Más** | Registrar viaje (compras), tasa del día, gastos y a quién le debes |

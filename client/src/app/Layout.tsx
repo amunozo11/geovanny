@@ -6,6 +6,7 @@ const SECCIONES = [
   { a: '/', texto: 'Inicio', icono: '🏠' },
   { a: '/inventario', texto: 'Inventario', icono: '📦' },
   { a: '/vender', texto: 'Vender', icono: '＋', destacado: true },
+  { a: '/ventas-totales', texto: 'Totales', icono: '🧾' },
   { a: '/clientes', texto: 'Clientes', icono: '👥' },
   { a: '/mas', texto: 'Más', icono: '☰' },
 ];
@@ -45,7 +46,7 @@ export function Layout() {
       </main>
 
       <nav className="safe-bottom fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-        <div className="mx-auto flex max-w-3xl items-center justify-around px-2 py-1.5">
+        <div className="mx-auto flex max-w-3xl items-center justify-around gap-0.5 px-1 py-1.5">
           {SECCIONES.map((seccion) => (
             <NavLink
               key={seccion.a}
@@ -53,7 +54,9 @@ export function Layout() {
               end={seccion.a === '/'}
               className={({ isActive }) =>
                 [
-                  'flex min-h-[52px] min-w-[60px] flex-col items-center justify-center gap-0.5 rounded-lg px-2 text-[11px]',
+                  // Seis pestañas tienen que caber en un teléfono de 360 px de
+                  // ancho sin apretarse ni desbordarse.
+                  'flex min-h-[52px] min-w-[50px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-[10px]',
                   seccion.destacado
                     ? 'bg-brand-600 font-bold text-white'
                     : isActive

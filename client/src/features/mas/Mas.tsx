@@ -6,6 +6,11 @@ import { Tarjeta } from '../../components/ui/base';
 import type { Persona } from '../../lib/tipos';
 
 const OPCIONES = [
+  {
+    a: '/ventas-totales',
+    titulo: 'Ventas totales',
+    texto: 'Lo del mostrador: producto, cantidad y precio, sin cliente',
+  },
   { a: '/mas/dias', titulo: 'Por días', texto: 'Todo lo que se registró cada día' },
   { a: '/mas/comprar', titulo: 'Registrar viaje', texto: 'Mercancía que entra, con su cargue' },
   { a: '/mas/cajas', titulo: 'Cajas', texto: 'Dónde está el dinero y cuánto hay' },
