@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { D, MONEDAS, formatMoney, money, type Moneda } from '@geovanny/shared';
+import { D, MONEDAS, cantidadTexto, formatMoney, money, type Moneda } from '@geovanny/shared';
 import type { ApiError } from '../../lib/api';
 import { api } from '../../lib/api';
 import { useMoneda } from '../moneda/contexto';
@@ -225,16 +225,17 @@ function FilaOperacion({
   return (
     <li className="py-3">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium">
+        <Link to={`/ventas/${operacion.id}`} className="min-w-0">
+          <p className="text-sm font-medium underline decoration-transparent hover:decoration-inherit">
             {operacion.numero} · {new Date(operacion.fecha).toLocaleDateString('es-CO')}
           </p>
           <p className="truncate text-xs opacity-60">
             {operacion.items
-              .map((i) => `${i.cantidad} ${i.nombre.toLowerCase()}`)
+              .map((i) => `${cantidadTexto(i.cantidad)} ${i.nombre.toLowerCase()}`)
               .join(' · ')}
           </p>
-        </div>
+          <p className="text-xs opacity-40">ver el detalle</p>
+        </Link>
         {/* En esta pantalla manda la moneda de la deuda, no la de visualización:
             mezclar "total en bolívares" con "debe en pesos" en la misma línea
             confunde, y aquí lo que importa es en qué se tiene que pagar. La

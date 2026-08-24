@@ -276,23 +276,31 @@ export function Inicio() {
         ) : (
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {r.ultimasVentas.map((venta) => (
-              <li key={venta.id} className="flex items-center justify-between gap-2 py-3">
-                <span className="min-w-0">
-                  <span className="block truncate font-medium">{venta.persona}</span>
-                  <span className="text-xs opacity-50">
-                    {venta.numero} ·{' '}
-                    {Number(venta.saldo) > 0 ? (
-                      <span className="text-amber-600 dark:text-amber-400">fiado</span>
-                    ) : (
-                      'pagado'
-                    )}
+              <li key={venta.id}>
+                <Link
+                  to={`/ventas/${venta.id}`}
+                  className="flex items-center justify-between gap-2 py-3"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">{venta.persona}</span>
+                    <span className="text-xs opacity-50">
+                      {venta.numero} ·{' '}
+                      {Number(venta.saldo) > 0 ? (
+                        <span className="text-amber-600 dark:text-amber-400">fiado</span>
+                      ) : (
+                        'pagado'
+                      )}
+                    </span>
                   </span>
-                </span>
-                <Plata importe={venta.total} className="shrink-0 text-right" />
+                  <Plata importe={venta.total} className="shrink-0 text-right" />
+                </Link>
               </li>
             ))}
           </ul>
         )}
+        <Link to="/ventas" className="mt-3 inline-block text-sm underline opacity-70">
+          Ver todas las ventas
+        </Link>
       </Tarjeta>
 
       {/* Explicar de dónde salen las conversiones evita el problema que hoy

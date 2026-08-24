@@ -14,6 +14,19 @@ export default defineConfig({
      * ninguna prueba, porque enseña a ignorar los rojos.
      */
     poolOptions: { threads: { maxThreads: 2 } },
+    /**
+     * 30 segundos por prueba, no los 5 de fábrica.
+     *
+     * Estas no son pruebas unitarias: cada una habla con un MongoDB de verdad y
+     * abre transacciones multidocumento. Con dos ficheros a la vez, la primera
+     * prueba de cada uno se pasaba de los 5 s de vez en cuando — y al agotarse
+     * el plazo la prueba NO se detiene: sigue escribiendo por detrás mientras la
+     * siguiente ya limpió la base, y esa se cae con un choque de clave duplicada
+     * que no tiene nada que ver con lo que estaba probando. Un rojo que no
+     * significa nada enseña a ignorar los rojos.
+     */
+    testTimeout: 30_000,
+    hookTimeout: 120_000,
     // Entorno de prueba autocontenido: los tests no deben depender de un .env
     // local ni de una base de datos levantada.
     env: {

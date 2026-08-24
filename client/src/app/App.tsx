@@ -6,6 +6,8 @@ import { Layout } from './Layout';
 import { Inicio } from '../features/inicio/Inicio';
 import { Vender } from '../features/vender/Vender';
 import { VentasTotales } from '../features/ventas/VentasTotales';
+import { Ventas } from '../features/ventas/Ventas';
+import { DetalleVenta } from '../features/ventas/DetalleVenta';
 import { Todo } from '../features/todo/Todo';
 import { Clientes } from '../features/clientes/Clientes';
 import { Cuenta } from '../features/clientes/Cuenta';
@@ -41,6 +43,8 @@ export function App() {
             <Route index element={<Inicio />} />
             <Route path="vender" element={<Vender />} />
             <Route path="ventas-totales" element={<VentasTotales />} />
+            <Route path="ventas" element={<Ventas />} />
+            <Route path="ventas/:id" element={<DetalleVenta />} />
             <Route path="todo" element={<Todo />} />
             <Route path="clientes" element={<Clientes />} />
             <Route path="clientes/deudas" element={<Deudas />} />

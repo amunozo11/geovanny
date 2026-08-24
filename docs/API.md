@@ -405,6 +405,27 @@ Estado de la API y de la base de datos. No pide sesión.
 
 ---
 
+## Numeración
+
+`V-0001` ventas · `C-0001` viajes · `P-0001` abonos de clientes · `A-0001`
+abonos a proveedores · `G-0001` gastos · `D-0001` préstamos y deudas sueltas.
+
+Sale de la colección `contadors`, un documento por prefijo (`_id: "V"`), con
+`$inc` atómico: dos ventas simultáneas nunca reciben el mismo número.
+
+**La clave no lleva el año.** Lo llevaba (`V:2026`), y como el número escrito no
+lo lleva y el índice de `numero` es único para siempre, el 1 de enero el contador
+habría vuelto a cero y la primera venta del año habría chocado con la del año
+anterior.
+
+En cada arranque, `sembrar()` sube cada contador hasta el número más alto que ya
+exista (`$max`, así que solo sube). Es la red para cuando el contador se queda
+atrás —una importación hecha por fuera, una copia restaurada, alguien que borra
+la colección—: sin eso el sistema reparte números repetidos y **toda** escritura
+falla con `E11000`, un error que quien está vendiendo no puede resolver.
+
+---
+
 ## Permisos por rol
 
 | Acción | ADMIN | VENDEDOR | CAJERO | CONSULTA |

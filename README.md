@@ -83,6 +83,7 @@ en bolívares, son dos cuentas distintas, como en el cuaderno.
 | **Clientes** | Quién debe y cuánto; al entrar, su cuenta completa, el botón de abonar y el de prestarle o cargarle una deuda aparte. Desde ahí sale la **hoja de cobro** imprimible (guardar como PDF) |
 | **Inventario** | Crear, editar y quitar productos —el catálogo empieza vacío—, existencias, costo real por bulto, conteos y mermas |
 | **Todo** | El cierre del día, moneda por moneda: lo vendido por producto, lo recogido, los gastos que se van anotando y cuánto debería quedar. Lo que sobra hoy es el saldo con el que arrancas mañana |
+| **Ventas** | Todas las ventas agrupadas por día; se abre cualquiera y se ve entera: qué se llevó, a cómo, cómo quedó y con qué tasa |
 | **Por días** | Todo lo que se registró cada día, en orden y con sus totales |
 | **Cajas** | Dónde está el dinero: efectivo por moneda, banco, pago móvil. Conteo y cambio de divisa |
 | **Más** | Registrar viaje (compras), tasa del día, gastos y a quién le debes |

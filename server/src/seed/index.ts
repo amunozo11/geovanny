@@ -7,6 +7,10 @@ import { createUser } from '../services/auth.service.js';
 import { actualizarDesdeApi, hayTasa, registrarTasa } from '../services/tasas.service.js';
 import { CajaModel } from '../models/caja.js';
 import { OperacionModel } from '../models/operacion.js';
+import { PagoModel } from '../models/pago.js';
+import { GastoModel } from '../models/gasto.js';
+import { CargoModel } from '../models/cargo.js';
+import { sincronizarContador } from '../models/contador.js';
 
 /**
  * Deja el sistema listo para usarse: administrador, catálogos, productos y una
@@ -146,6 +150,41 @@ async function migrarPagadoInicial(): Promise<void> {
   }
 }
 
+/**
+ * Deja cada contador por encima del número más alto que ya exista.
+ *
+ * Corre en cada arranque porque el contador vive aparte de lo que numera y
+ * puede quedarse atrás: una importación hecha por fuera, una restauración de
+ * copia, alguien que borra la colección. Cuando eso pasa, el sistema reparte
+ * números que ya existen y **cada venta, cada abono y cada gasto falla** con un
+ * choque de clave duplicada que quien está vendiendo no puede resolver.
+ *
+ * Es barato (una lectura por prefijo) y con `$max` no puede hacer daño: solo
+ * sube el contador, nunca lo baja.
+ */
+async function sincronizarNumeracion(): Promise<void> {
+  const numeros = async (
+    documentos: Promise<{ numero: string }[]>,
+  ): Promise<string[]> => (await documentos).map((d) => d.numero);
+
+  const fuentes: [string, Promise<string[]>][] = [
+    ['V', numeros(OperacionModel.find({ tipo: 'VENTA' }, { numero: 1 }).lean())],
+    ['C', numeros(OperacionModel.find({ tipo: 'COMPRA' }, { numero: 1 }).lean())],
+    ['P', numeros(PagoModel.find({ direccion: 'ENTRA' }, { numero: 1 }).lean())],
+    ['A', numeros(PagoModel.find({ direccion: 'SALE' }, { numero: 1 }).lean())],
+    ['G', numeros(GastoModel.find({}, { numero: 1 }).lean())],
+    ['D', numeros(CargoModel.find({}, { numero: 1 }).lean())],
+  ];
+
+  const ajustados: Record<string, number> = {};
+  for (const [prefijo, pendiente] of fuentes) {
+    const mayor = await sincronizarContador(prefijo, await pendiente);
+    if (mayor > 0) ajustados[prefijo] = mayor;
+  }
+
+  logger.info(ajustados, 'Numeración sincronizada');
+}
+
 async function sembrarAdmin(): Promise<void> {
   if ((await UserModel.estimatedDocumentCount()) > 0) {
     logger.info('Ya existen usuarios: no se crea el administrador');
@@ -185,6 +224,7 @@ export async function sembrar(): Promise<void> {
   await sembrarCatalogos();
   await sembrarCajas();
   await sembrarTasa();
+  await sincronizarNumeracion();
   await migrarPagadoInicial();
 }
 
