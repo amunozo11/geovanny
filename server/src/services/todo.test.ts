@@ -12,6 +12,7 @@ import { registrar as venderTotal } from './ventasTotales.service.js';
 import { registrarCargo, anularCargo, corregirCargo } from './cargos.service.js';
 import { registrarPago, anularPago, corregirPago } from './pagos.service.js';
 import { guardarCierre, informeDelDia } from './todo.service.js';
+import { anularGasto, registrarGasto } from './gastos.service.js';
 import { siguienteNumero } from '../models/contador.js';
 import { crearImporte } from '@geovanny/shared';
 import { diaDeHoy } from '../lib/dias.js';
@@ -459,6 +460,71 @@ describe('TODO: el día entero, moneda por moneda', () => {
     const informe = await informeDelDia(diaDeHoy());
     expect(informe.entradas.cobrado.USD).toBe('30');
     expect(informe.entradas.recogido.USD).toBe('30');
+  });
+
+  describe('Quitar un gasto mal anotado', () => {
+    it('devuelve la plata a la caja de donde salió', async () => {
+      await base();
+      const caja = await CajaModel.create({ nombre: 'Bolívares', moneda: 'VES', saldo: '500000' });
+
+      const gasto = await registrarGasto({
+        categoria: 'OTROS',
+        descripcion: 'Luisma',
+        monto: '80000',
+        moneda: 'VES',
+        cajaId: caja._id.toString(),
+      });
+      expect((await CajaModel.findById(caja._id))!.saldo).toBe('420000');
+
+      await anularGasto(gasto._id.toString(), 'Me equivoqué');
+
+      // Sin esto la caja se quedaba corta para siempre y el cierre del día
+      // pedía contar menos billetes de los que había.
+      expect((await CajaModel.findById(caja._id))!.saldo).toBe('500000');
+    });
+
+    it('desaparece del día y deja de restar del total', async () => {
+      const { papa } = await base();
+      await venderTotal({
+        productoId: papa._id.toString(),
+        cantidad: '10',
+        precio: '10',
+        moneda: 'USD',
+      });
+      const gasto = await registrarGasto({
+        categoria: 'OTROS',
+        descripcion: 'Luisma',
+        monto: '15',
+        moneda: 'USD',
+      });
+
+      expect((await informeDelDia(diaDeHoy())).deberiaQuedar.USD).toBe('85');
+
+      await anularGasto(gasto._id.toString(), 'Me equivoqué');
+
+      const informe = await informeDelDia(diaDeHoy());
+      expect(informe.salidas.gastos).toHaveLength(0);
+      expect(informe.salidas.gastado.USD).toBe('0');
+      expect(informe.deberiaQuedar.USD).toBe('100');
+    });
+
+    it('no se puede quitar dos veces', async () => {
+      await base();
+      const caja = await CajaModel.create({ nombre: 'Dólares', moneda: 'USD', saldo: '100' });
+      const gasto = await registrarGasto({
+        categoria: 'OTROS',
+        descripcion: 'Luisma',
+        monto: '20',
+        moneda: 'USD',
+        cajaId: caja._id.toString(),
+      });
+
+      await anularGasto(gasto._id.toString(), 'Me equivoqué');
+      await expect(anularGasto(gasto._id.toString(), 'Otra vez')).rejects.toThrow(/ya estaba/i);
+
+      // Si dejara, la caja acabaría con plata que nunca existió.
+      expect((await CajaModel.findById(caja._id))!.saldo).toBe('100');
+    });
   });
 
   describe('El sobrante pasa al día siguiente', () => {

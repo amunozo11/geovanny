@@ -194,19 +194,12 @@ export function Todo() {
         ) : (
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {informe.salidas.gastos.map((gasto) => (
-              <li key={gasto.id} className="flex items-center justify-between gap-3 py-2">
-                <span className="min-w-0">
-                  <span className="block truncate text-sm">
-                    {gasto.descripcion || gasto.categoria.toLowerCase()}
-                  </span>
-                  <span className="text-xs opacity-50">
-                    {gasto.categoria.toLowerCase()} · {gasto.hora}
-                  </span>
-                </span>
-                <span className="tabular shrink-0 text-sm">
-                  − {formatMoney(money(gasto.monto, gasto.moneda))}
-                </span>
-              </li>
+              <FilaGasto
+                key={gasto.id}
+                gasto={gasto}
+                puedeQuitar={puede('expense:write')}
+                onListo={refrescar}
+              />
             ))}
           </ul>
         )}
@@ -271,6 +264,98 @@ export function Todo() {
 
       <FormularioCierre informe={informe} monedas={monedas} onListo={refrescar} />
     </div>
+  );
+}
+
+/**
+ * Un gasto del día, con su ✕ para quitarlo.
+ *
+ * Estos se anotan a la carrera mientras se despacha, así que equivocarse es
+ * cuestión de tiempo. Quitarlo devuelve la plata a la caja de donde salió y el
+ * "debería quedar" de abajo se recalcula solo.
+ *
+ * Pide confirmación en el sitio: un ✕ suelto junto a una cifra, en un teléfono
+ * y con prisa, se pulsa sin querer.
+ */
+function FilaGasto({
+  gasto,
+  puedeQuitar,
+  onListo,
+}: {
+  gasto: InformeTodo['salidas']['gastos'][number];
+  puedeQuitar: boolean;
+  onListo: () => void;
+}) {
+  const [confirmando, setConfirmando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const quitar = useMutation({
+    mutationFn: () =>
+      api(`/gastos/${gasto.id}/anular`, {
+        method: 'POST',
+        body: JSON.stringify({ motivo: 'Anotado por equivocación' }),
+      }),
+    onSuccess: onListo,
+    onError: (e: ApiError) => setError(e.message),
+  });
+
+  return (
+    <li className="py-2">
+      <div className="flex items-center justify-between gap-3">
+        <span className="min-w-0">
+          <span className="block truncate text-sm">
+            {gasto.descripcion || gasto.categoria.toLowerCase()}
+          </span>
+          <span className="text-xs opacity-50">
+            {gasto.categoria.toLowerCase()} · {gasto.hora}
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-1">
+          <span className="tabular text-sm">
+            − {formatMoney(money(gasto.monto, gasto.moneda))}
+          </span>
+          {puedeQuitar && !confirmando && (
+            <button
+              type="button"
+              aria-label={`Quitar el gasto ${gasto.descripcion || gasto.categoria}`}
+              onClick={() => setConfirmando(true)}
+              className="px-1 text-lg opacity-40 hover:opacity-100"
+            >
+              ✕
+            </button>
+          )}
+        </span>
+      </div>
+
+      {confirmando && (
+        <div className="mt-2 space-y-2">
+          <p className="text-xs opacity-70">
+            ¿Quitar este gasto? La plata vuelve a la caja de donde salió.
+          </p>
+          {error && <Aviso tono="error">{error}</Aviso>}
+          <div className="flex gap-2">
+            <Boton
+              variante="secundario"
+              onClick={() => {
+                setConfirmando(false);
+                setError(null);
+              }}
+              className="flex-1 text-sm"
+            >
+              No
+            </Boton>
+            <Boton
+              variante="peligro"
+              onClick={() => quitar.mutate()}
+              disabled={quitar.isPending}
+              className="flex-1 text-sm"
+            >
+              {quitar.isPending ? 'Quitando…' : 'Sí, quitar'}
+            </Boton>
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
 

@@ -1,11 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { MONEDAS, crearImporte } from '@geovanny/shared';
+import { MONEDAS } from '@geovanny/shared';
 import { requireAuth, requirePermission } from '../middleware/auth.js';
 import { GastoModel } from '../models/gasto.js';
-import { siguienteNumero } from '../models/contador.js';
-import { tasaVigente } from '../services/tasas.service.js';
-import { registrarMovimiento } from '../services/cajas.service.js';
+import * as gastos from '../services/gastos.service.js';
 
 export const gastosRouter = Router();
 
@@ -25,8 +23,8 @@ gastosRouter.get('/', async (req, res) => {
   const consulta: Record<string, unknown> = { estado: 'ACTIVO' };
   if (req.query.desde) consulta.fecha = { $gte: new Date(String(req.query.desde)) };
 
-  const gastos = await GastoModel.find(consulta).sort({ fecha: -1 }).limit(200);
-  res.json({ data: gastos });
+  const lista = await GastoModel.find(consulta).sort({ fecha: -1 }).limit(200);
+  res.json({ data: lista });
 });
 
 /**
@@ -59,40 +57,15 @@ gastosRouter.get('/nombres', async (_req, res) => {
 
 gastosRouter.post('/', requirePermission('expense:write'), async (req, res) => {
   const entrada = gastoSchema.parse(req.body);
-  const tasa = await tasaVigente();
-
-  const gasto = await GastoModel.create({
-    numero: await siguienteNumero('G'),
-    categoria: entrada.categoria,
-    tipo: entrada.tipo,
-    descripcion: entrada.descripcion,
-    // El gasto guarda su valor en las tres monedas, como todo lo demás (§17).
-    importe: crearImporte(entrada.monto, entrada.moneda, tasa),
-    fecha: entrada.fecha ? new Date(entrada.fecha) : new Date(),
-    creadoPor: req.user!.id,
-  });
-
-  // El gasto sale de la caja: si pagaste el transporte, ese dinero ya no está.
-  await registrarMovimiento({
-    cajaId: entrada.cajaId ?? null,
-    moneda: entrada.moneda,
-    monto: `-${entrada.monto}`,
-    tipo: 'EGRESO',
-    concepto: `${entrada.categoria.toLowerCase()}${entrada.descripcion ? ` · ${entrada.descripcion}` : ''}`,
-    refTipo: 'GASTO',
-    refId: gasto._id,
-    refNumero: gasto.numero,
-    creadoPor: req.user!.id,
-  });
-
+  const gasto = await gastos.registrarGasto({ ...entrada, creadoPor: req.user!.id });
   res.status(201).json({ data: gasto });
 });
 
+/** Quitar un gasto mal anotado: devuelve la plata a la caja de donde salió. */
 gastosRouter.post('/:id/anular', requirePermission('expense:write'), async (req, res) => {
-  const gasto = await GastoModel.findByIdAndUpdate(
-    String(req.params.id),
-    { estado: 'ANULADO' },
-    { new: true },
-  );
-  res.json({ data: gasto });
+  const { motivo } = z
+    .object({ motivo: z.string().max(200).default('Anotado por equivocación') })
+    .parse(req.body ?? {});
+
+  res.json({ data: await gastos.anularGasto(String(req.params.id), motivo, req.user!.id) });
 });
