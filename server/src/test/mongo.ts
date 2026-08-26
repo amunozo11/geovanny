@@ -1,31 +1,38 @@
-import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
+import { inject } from 'vitest';
 
 /**
- * MongoDB real, en memoria y **en replica set**, para las pruebas.
+ * Conexión a la base de pruebas.
  *
- * El replica set no es un lujo: sin él no hay transacciones multi-documento, y
- * casi todo lo que importa en este sistema (una venta toca 6 colecciones a la
- * vez) depende de ellas. Ver DATABASE.md §20.
+ * El `mongod` lo levanta `globalSetup` una sola vez para toda la corrida; aquí
+ * solo se abre la conexión. Cada worker usa su propia base dentro del mismo
+ * servidor, así que dos ficheros en paralelo no se pisan los datos.
  *
- * Ventaja adicional: no necesita Docker, así que las pruebas corren igual en
- * cualquier máquina y en CI.
+ * `startTestMongo` es idempotente a propósito: un fichero con varios bloques
+ * `describe` lo llama una vez por bloque, y reconectar en cada uno era tiempo
+ * tirado —y una fuente de fallos cuando el `afterAll` de un bloque cerraba la
+ * conexión que el siguiente acababa de abrir.
  */
-let replSet: MongoMemoryReplSet | null = null;
+
+/** Una base por worker: los ficheros en paralelo no comparten datos. */
+const nombreBase = () => `geovanny_test_${process.env.VITEST_WORKER_ID ?? '0'}`;
 
 export async function startTestMongo(): Promise<string> {
-  replSet = await MongoMemoryReplSet.create({
-    replSet: { count: 1, storageEngine: 'wiredTiger' },
-  });
-  const uri = replSet.getUri();
-  await mongoose.connect(uri, { dbName: 'geovanny_test' });
+  const uri = inject('mongoUri');
+  if (mongoose.connection.readyState === 1) return uri;
+
+  await mongoose.connect(uri, { dbName: nombreBase() });
   return uri;
 }
 
+/**
+ * No para el servidor —es de toda la corrida—, solo cierra la conexión.
+ * Se deja la base limpia para el fichero que venga después en este worker.
+ */
 export async function stopTestMongo(): Promise<void> {
+  if (mongoose.connection.readyState !== 1) return;
+  await clearTestMongo();
   await mongoose.disconnect();
-  await replSet?.stop();
-  replSet = null;
 }
 
 /** Deja la base limpia entre pruebas sin recrear el servidor (es lo caro). */

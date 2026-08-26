@@ -92,9 +92,19 @@ textarea {
     border-bottom: 1px solid #999 !important;
   }
 
-  /* Un cliente no se parte entre dos páginas. */
+  /* Ni un renglón ni un bloque de moneda se parten entre dos páginas. */
   tr {
     break-inside: avoid;
+  }
+
+  section {
+    break-inside: avoid;
+    border: 1px solid #999 !important;
+  }
+
+  /* El encabezado de cada moneda no se queda huérfano al final de una página. */
+  h2 {
+    break-after: avoid;
   }
 
   @page {

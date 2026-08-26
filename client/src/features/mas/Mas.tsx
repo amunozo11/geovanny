@@ -50,7 +50,16 @@ export function Mas() {
         ))}
       </div>
 
-      <Tarjeta titulo="A quién le debes">
+      <Tarjeta
+        titulo="A quién le debes"
+        pie={
+          conDeuda.length > 0 ? (
+            <Link to="/proveedores/deudas" className="underline">
+              Reporte para imprimir
+            </Link>
+          ) : undefined
+        }
+      >
         {conDeuda.length === 0 ? (
           <p className="py-2 text-sm opacity-60">No le debes a ningún proveedor.</p>
         ) : (

@@ -80,13 +80,13 @@ en bolívares, son dos cuentas distintas, como en el cuaderno.
 | **Inicio** | Cuánto debes contra cuánto te deben, ventas del día, ganancia del mes, inventario y quién te debe |
 | **Vender** | Cliente, productos y guardar. Siempre fiado: se carga a la cuenta del cliente y los abonos se registran desde ahí |
 | **Ventas totales** | Lo del mostrador, sin cliente: se toca el producto, se pone cantidad y precio, y se va guardando uno a uno o todos de golpe. Al cerrar, cuánto salió y a cuánto equivale en dólares y en bolívares |
-| **Clientes** | Quién debe y cuánto; al entrar, su cuenta completa, el botón de abonar y el de prestarle o cargarle una deuda aparte. Desde ahí sale la **hoja de cobro** imprimible (guardar como PDF) |
+| **Clientes** | Quién debe y cuánto; al entrar, su cuenta completa, el botón de abonar y el de prestarle o cargarle una deuda aparte. Desde ahí sale el reporte **Cuentas por cobrar**, listo para guardar como PDF |
 | **Inventario** | Crear, editar y quitar productos —el catálogo empieza vacío—, existencias, costo real por bulto, conteos y mermas |
 | **Todo** | El cierre del día, moneda por moneda: lo vendido por producto, lo recogido, los gastos que se van anotando y cuánto debería quedar. Lo que sobra hoy es el saldo con el que arrancas mañana |
 | **Ventas** | Todas las ventas agrupadas por día; se abre cualquiera y se ve entera: qué se llevó, a cómo, cómo quedó y con qué tasa |
 | **Por días** | Todo lo que se registró cada día, en orden y con sus totales |
 | **Cajas** | Dónde está el dinero: efectivo por moneda, banco, pago móvil. Conteo y cambio de divisa |
-| **Más** | Registrar viaje (compras), tasa del día, gastos y a quién le debes |
+| **Más** | Registrar viaje (compras), tasa del día, gastos y a quién le debes, con su reporte **Cuentas por pagar** en PDF |
 
 ---
 

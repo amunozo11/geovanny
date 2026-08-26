@@ -101,17 +101,21 @@ Clientes y proveedores comparten endpoint: son la misma entidad.
 | GET | `/` | `?tipo=CLIENTE` (o `PROVEEDOR`, `TRANSPORTE`) y `?q=` |
 | POST | `/` | `{nombre, tipo}` — solo el nombre es obligatorio (CN-3) |
 | PATCH | `/:id` | |
-| GET | `/deudas` | `?tipo=CLIENTE` — **hoja de cobro**: un renglón por persona con saldo |
+| GET | `/deudas` | `?tipo=CLIENTE\|PROVEEDOR` — reporte: un renglón por persona con saldo |
 | GET | `/:id/cuenta` | **Estado de cuenta**: la persona, sus operaciones y sus abonos |
 
 `saldos` trae una deuda por moneda. Negativo significa saldo a favor.
 
-`GET /deudas` devuelve `{generado, filas, total}`. Cada fila trae `nombre`,
-`desde` (el movimiento pendiente más antiguo: cuánto lleva esperando el cobro),
-`debe` (la mercancía pendiente sumada por producto, más los conceptos de los
-préstamos) y `saldos` por moneda. Va **resumido y no detallado** a propósito: es
-la hoja con la que se sale a la calle, y ahí el detalle venta a venta estorba.
-Solo entra lo que sigue sin pagarse.
+`GET /deudas` devuelve `{generado, tipo, filas, total}`. Cada fila trae solo
+`nombre`, `telefono` y `saldos` por moneda: es la hoja con la que se sale a
+cobrar —o a pagar—, y ahí el detalle venta a venta estorba. Ese detalle ya está
+en `/:id/cuenta`.
+
+`tipo=PROVEEDOR` incluye también a los de `TRANSPORTE`: para quien paga, son
+gente a la que se le debe igual.
+
+El `total` va **por moneda y sin sumarse entre ellas**. Un total que juntara
+dólares con bolívares sería un número que no existe (CN-2).
 
 ---
 

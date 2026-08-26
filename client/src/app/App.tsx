@@ -47,7 +47,8 @@ export function App() {
             <Route path="ventas/:id" element={<DetalleVenta />} />
             <Route path="todo" element={<Todo />} />
             <Route path="clientes" element={<Clientes />} />
-            <Route path="clientes/deudas" element={<Deudas />} />
+            <Route path="clientes/deudas" element={<Deudas tipo="CLIENTE" />} />
+            <Route path="proveedores/deudas" element={<Deudas tipo="PROVEEDOR" />} />
             <Route path="clientes/:id" element={<Cuenta />} />
             <Route path="proveedores/:id" element={<Cuenta />} />
             <Route path="inventario" element={<Inventario />} />

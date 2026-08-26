@@ -355,6 +355,63 @@ describe('Deudas que no vienen de una venta', () => {
   });
 });
 
+describe('El reporte de deudas', () => {
+  beforeAll(async () => {
+    await startTestMongo();
+  }, 120_000);
+
+  afterAll(async () => {
+    await stopTestMongo();
+  });
+
+  beforeEach(async () => {
+    await clearTestMongo();
+    limpiarCache();
+  });
+
+  /** Lo mismo que hace la ruta, sin levantar HTTP. */
+  async function reporte(tipo: 'CLIENTE' | 'PROVEEDOR') {
+    const consulta =
+      tipo === 'CLIENTE'
+        ? { tipo: 'CLIENTE', activo: true }
+        : { tipo: { $in: ['PROVEEDOR', 'TRANSPORTE'] }, activo: true };
+    const personas = await PersonaModel.find(consulta).sort({ nombre: 1 });
+    return personas.filter((p) =>
+      (['COP', 'USD', 'VES'] as const).some((m) => Number(p.saldos[m] ?? '0') !== 0),
+    );
+  }
+
+  it('separa lo que me deben de lo que debo', async () => {
+    await base();
+    const proveedor = await PersonaModel.create({ nombre: 'HIJINIO', tipo: 'PROVEEDOR' });
+    const transporte = await PersonaModel.create({ nombre: 'EL CARRO', tipo: 'TRANSPORTE' });
+
+    await registrarCargo({
+      personaId: (await PersonaModel.findOne({ nombre: 'MEMIN' }))!._id.toString(),
+      tipo: 'DEUDA',
+      concepto: 'VIEJO',
+      monto: '500',
+      moneda: 'USD',
+    });
+    await PersonaModel.updateOne({ _id: proveedor._id }, { $set: { 'saldos.VES': '900000' } });
+    await PersonaModel.updateOne({ _id: transporte._id }, { $set: { 'saldos.USD': '120' } });
+
+    const clientes = await reporte('CLIENTE');
+    expect(clientes.map((p) => p.nombre)).toEqual(['MEMIN']);
+
+    // Los de transporte también son gente a la que se le debe.
+    const proveedores = await reporte('PROVEEDOR');
+    expect(proveedores.map((p) => p.nombre).sort()).toEqual(['EL CARRO', 'HIJINIO']);
+  });
+
+  it('deja fuera a quien está al día', async () => {
+    await base();
+    await PersonaModel.create({ nombre: 'AL DIA', tipo: 'CLIENTE' });
+
+    expect((await reporte('CLIENTE')).map((p) => p.nombre)).toEqual([]);
+  });
+});
+
 describe('TODO: el día entero, moneda por moneda', () => {
   beforeAll(async () => {
     await startTestMongo();

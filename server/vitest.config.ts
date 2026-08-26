@@ -4,26 +4,25 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',
+    // Un solo mongod para toda la corrida, no uno por fichero.
+    globalSetup: ['./src/test/globalSetup.ts'],
     /**
-     * Dos ficheros a la vez como mucho.
+     * Cuatro ficheros a la vez.
      *
-     * Cada fichero de prueba levanta un `mongod` real en replica set —hace
-     * falta para las transacciones— y arrancar ocho a la vez pone la máquina de
-     * rodillas: los tests empiezan a fallar por tiempo de espera, no porque el
-     * código esté mal. Un fallo intermitente que no significa nada es peor que
-     * ninguna prueba, porque enseña a ignorar los rojos.
+     * Ya no arrancan un `mongod` cada uno —lo comparten todos, ver
+     * `globalSetup`—, así que la máquina aguanta más paralelismo del que hacía
+     * falta cuando cada fichero traía su propio servidor a cuestas.
      */
-    poolOptions: { threads: { maxThreads: 2 } },
+    poolOptions: { threads: { maxThreads: 4 } },
     /**
      * 30 segundos por prueba, no los 5 de fábrica.
      *
      * Estas no son pruebas unitarias: cada una habla con un MongoDB de verdad y
-     * abre transacciones multidocumento. Con dos ficheros a la vez, la primera
-     * prueba de cada uno se pasaba de los 5 s de vez en cuando — y al agotarse
-     * el plazo la prueba NO se detiene: sigue escribiendo por detrás mientras la
-     * siguiente ya limpió la base, y esa se cae con un choque de clave duplicada
-     * que no tiene nada que ver con lo que estaba probando. Un rojo que no
-     * significa nada enseña a ignorar los rojos.
+     * abre transacciones multidocumento. Con los 5 s de fábrica, alguna se
+     * pasaba de plazo de vez en cuando — y al agotarse, la prueba NO se detiene:
+     * sigue escribiendo por detrás mientras la siguiente ya limpió la base, y
+     * esa se cae con un choque de clave duplicada que no tiene nada que ver con
+     * lo que estaba probando.
      */
     testTimeout: 30_000,
     hookTimeout: 120_000,
