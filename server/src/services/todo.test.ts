@@ -637,7 +637,73 @@ describe('TODO: el día entero, moneda por moneda', () => {
     expect(informe.entradas.recogido.USD).toBe('20');
   });
 
-  it('descuenta gastos, abonos a proveedores y préstamos entregados', async () => {
+  /**
+   * La regla: lo que se le paga a un proveedor NO baja el total del día. Es una
+   * decisión del negocio —ese dinero no es parte de lo que se hizo vendiendo— y
+   * se comprueba aquí porque es de las cosas que se cuelan solas al tocar el
+   * cálculo más adelante.
+   */
+  it('lo pagado a proveedores no baja el total del día', async () => {
+    const { papa } = await base();
+    const proveedor = await PersonaModel.create({ nombre: 'HIJINIO', tipo: 'PROVEEDOR' });
+
+    await venderTotal({
+      productoId: papa._id.toString(),
+      cantidad: '10',
+      precio: '10',
+      moneda: 'USD',
+    });
+    await registrarCargo({
+      personaId: proveedor._id.toString(),
+      tipo: 'DEUDA',
+      concepto: 'Saldo del viaje',
+      monto: '400',
+      moneda: 'USD',
+    });
+    await registrarPago({
+      personaId: proveedor._id.toString(),
+      direccion: 'SALE',
+      monto: '250',
+      moneda: 'USD',
+    });
+
+    const informe = await informeDelDia(diaDeHoy());
+
+    // Se ve, con su nombre y su número…
+    expect(informe.salidas.aProveedores.USD).toBe('250');
+    expect(informe.salidas.pagos).toHaveLength(1);
+
+    // …pero no toca la cuenta: entraron 100 y no salió nada más.
+    expect(informe.salidas.total.USD).toBe('0');
+    expect(informe.queda.USD).toBe('100');
+    expect(informe.deberiaQuedar.USD).toBe('100');
+  });
+
+  it('tampoco baja el saldo que se arrastra al día siguiente', async () => {
+    const { papa } = await base();
+    const proveedor = await PersonaModel.create({ nombre: 'HIJINIO', tipo: 'PROVEEDOR' });
+    const ayer = new Date(Date.now() - 24 * 3_600_000);
+
+    await venderTotal({
+      productoId: papa._id.toString(),
+      cantidad: '10',
+      precio: '10',
+      moneda: 'USD',
+      fecha: ayer.toISOString(),
+    });
+    await registrarPago({
+      personaId: proveedor._id.toString(),
+      direccion: 'SALE',
+      monto: '250',
+      moneda: 'USD',
+      fecha: ayer.toISOString(),
+    });
+
+    // Si el arrastre restara los 250, no cuadraría con lo que enseñó ayer.
+    expect((await informeDelDia(diaDeHoy())).vieneDeAntes.sobrante.USD).toBe('100');
+  });
+
+  it('descuenta gastos y préstamos entregados', async () => {
     const { papa, cliente } = await base();
 
     await venderTotal({

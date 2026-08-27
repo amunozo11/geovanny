@@ -108,10 +108,9 @@ async function loQueViene(dia: string) {
 async function loQueSeMovio(desde: Date, hasta: Date): Promise<Record<Moneda, string>> {
   const rango = { $gte: desde, $lt: hasta };
 
-  const [ventas, cobros, pagosProveedor, gastos, prestamos] = await Promise.all([
+  const [ventas, cobros, gastos, prestamos] = await Promise.all([
     OperacionModel.find({ tipo: 'VENTA', estado: 'ACTIVA', fecha: rango }, { moneda: 1, pagadoInicial: 1 }),
     PagoModel.find({ direccion: 'ENTRA', estado: 'ACTIVO', fecha: rango }, { importe: 1 }),
-    PagoModel.find({ direccion: 'SALE', estado: 'ACTIVO', fecha: rango }, { importe: 1 }),
     GastoModel.find({ estado: 'ACTIVO', fecha: rango }, { importe: 1 }),
     CargoModel.find({ estado: 'ACTIVO', salioDeCaja: true, fecha: rango }, { moneda: 1, importe: 1 }),
   ]);
@@ -120,8 +119,9 @@ async function loQueSeMovio(desde: Date, hasta: Date): Promise<Record<Moneda, st
   for (const v of ventas) sumarEn(entra, v.moneda, v.pagadoInicial);
   for (const p of cobros) sumarEn(entra, p.importe.moneda, p.importe.monto);
 
+  // Los pagos a proveedores quedan fuera, igual que en el día: si se restaran
+  // aquí, el saldo arrastrado no cuadraría con el que enseña la pantalla.
   const sale = enCero();
-  for (const p of pagosProveedor) sumarEn(sale, p.importe.moneda, p.importe.monto);
   for (const g of gastos) sumarEn(sale, g.importe.moneda, g.importe.monto);
   for (const c of prestamos) sumarEn(sale, c.moneda, c.importe.monto);
 
@@ -246,7 +246,16 @@ export async function informeDelDia(dia: string) {
   for (const cargo of prestamos) sumarEn(prestado, cargo.moneda, cargo.importe.monto);
 
   const recogido = sumar(contado, cobrado);
-  const salidas = sumar(gastado, aProveedores, prestado);
+  /**
+   * Lo que sale de la cuenta del día. **Los pagos a proveedores NO entran.**
+   *
+   * Es una decisión del negocio, no un descuido: lo que se le paga a un
+   * proveedor no es parte de lo que se hizo vendiendo, y meterlo aquí tapaba el
+   * número que esta pantalla existe para responder. Se siguen registrando, se
+   * siguen viendo aparte, y siguen saliendo de su caja — pero no se restan de
+   * este total.
+   */
+  const salidas = sumar(gastado, prestado);
   const queda = restar(recogido, salidas);
   const deberiaQuedar = sumar(vieneDeAntes.sobrante, queda);
 
@@ -287,6 +296,7 @@ export async function informeDelDia(dia: string) {
 
     salidas: {
       gastado,
+      /** Se informa, pero **no** se resta del total (ver `salidas.total`). */
       aProveedores,
       prestado,
       total: salidas,

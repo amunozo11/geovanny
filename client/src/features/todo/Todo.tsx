@@ -207,16 +207,8 @@ export function Todo() {
 
         {puede('expense:write') && <NuevoGasto dia={dia} onListo={refrescar} />}
 
-        {(informe.salidas.pagos.length > 0 || informe.salidas.prestamos.length > 0) && (
+        {informe.salidas.prestamos.length > 0 && (
           <div className="mt-3 space-y-1 border-t border-slate-200 pt-3 text-xs dark:border-slate-800">
-            {informe.salidas.pagos.map((pago) => (
-              <p key={pago.id} className="flex justify-between gap-2 opacity-70">
-                <span className="truncate">Abono a {pago.persona}</span>
-                <span className="tabular shrink-0">
-                  − {formatMoney(money(pago.monto, pago.moneda))}
-                </span>
-              </p>
-            ))}
             {informe.salidas.prestamos.map((prestamo) => (
               <p key={prestamo.id} className="flex justify-between gap-2 opacity-70">
                 <span className="truncate">
@@ -228,7 +220,7 @@ export function Todo() {
               </p>
             ))}
             <p className="pt-1 opacity-50">
-              Estos salieron por otras pantallas, pero también sacaron plata del cajón.
+              Salió por otra pantalla, pero también sacó plata del cajón.
             </p>
           </div>
         )}
@@ -244,6 +236,38 @@ export function Todo() {
         </div>
       </Tarjeta>
 
+      {/* Los pagos a proveedores se registran y se ven, pero NO entran en la
+          cuenta del día: lo que se le paga a un proveedor no es parte de lo que
+          se hizo vendiendo, y meterlo aquí tapaba el número que esta pantalla
+          existe para responder. */}
+      {informe.salidas.pagos.length > 0 && (
+        <Tarjeta titulo="Pagado a proveedores">
+          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+            {informe.salidas.pagos.map((pago) => (
+              <li key={pago.id} className="flex items-baseline justify-between gap-3 py-2">
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium">{pago.persona}</span>
+                  <span className="text-xs opacity-50">
+                    {pago.numero} · {pago.hora}
+                  </span>
+                </span>
+                <span className="tabular shrink-0 text-sm font-semibold">
+                  {formatMoney(money(pago.monto, pago.moneda))}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 border-t border-slate-200 pt-2 dark:border-slate-800">
+            <Fila texto="Total pagado" bolsa={informe.salidas.aProveedores} monedas={monedas} fuerte />
+          </div>
+          <p className="mt-2 text-xs opacity-60">
+            <strong>No entra en la cuenta de abajo.</strong> Se anota aquí para tenerlo a la vista
+            y sale de su caja, pero no se resta del día: lo que se le paga a un proveedor no es
+            parte de lo que se hizo vendiendo.
+          </p>
+        </Tarjeta>
+      )}
+
       {/* ── La cuenta final ────────────────────────────────────────────── */}
       <Tarjeta destacada>
         <p className="mb-2 text-xs tracking-wide uppercase opacity-60">Debería quedar</p>
@@ -258,8 +282,8 @@ export function Todo() {
           ))}
         </div>
         <p className="mt-3 border-t border-white/15 pt-2 text-xs opacity-60">
-          Lo que traías, más lo que recogiste, menos lo que salió. Es lo que tendría que haber en el
-          cajón ahora mismo.
+          Lo que traías, más lo que recogiste, menos los gastos. Sin contar lo pagado a
+          proveedores, que va aparte.
         </p>
       </Tarjeta>
 
