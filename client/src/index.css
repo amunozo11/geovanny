@@ -107,6 +107,22 @@ textarea {
     break-after: avoid;
   }
 
+  /* Si una tabla se parte, sus títulos se repiten arriba en la página nueva. */
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-row-group;
+  }
+
+  /* Las líneas de la hoja, en negro: los grises claros no salen en papel. */
+  header,
+  h2,
+  tfoot tr {
+    border-color: #000 !important;
+  }
+
   @page {
     margin: 14mm;
   }

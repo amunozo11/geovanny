@@ -12,6 +12,8 @@ import { Todo } from '../features/todo/Todo';
 import { Clientes } from '../features/clientes/Clientes';
 import { Cuenta } from '../features/clientes/Cuenta';
 import { Deudas } from '../features/clientes/Deudas';
+import { Proveedores } from '../features/clientes/Proveedores';
+import { ReporteCuenta } from '../features/clientes/ReporteCuenta';
 import { Inventario } from '../features/inventario/Inventario';
 import { Mas } from '../features/mas/Mas';
 import { Tasas } from '../features/mas/Tasas';
@@ -48,7 +50,10 @@ export function App() {
             <Route path="todo" element={<Todo />} />
             <Route path="clientes" element={<Clientes />} />
             <Route path="clientes/deudas" element={<Deudas tipo="CLIENTE" />} />
+            <Route path="proveedores" element={<Proveedores />} />
             <Route path="proveedores/deudas" element={<Deudas tipo="PROVEEDOR" />} />
+            <Route path="clientes/:id/reporte" element={<ReporteCuenta tipo="CLIENTE" />} />
+            <Route path="proveedores/:id/reporte" element={<ReporteCuenta tipo="PROVEEDOR" />} />
             <Route path="clientes/:id" element={<Cuenta />} />
             <Route path="proveedores/:id" element={<Cuenta />} />
             <Route path="inventario" element={<Inventario />} />

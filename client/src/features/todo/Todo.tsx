@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { D, MONEDAS, conUnidad, formatMoney, money, type Moneda } from '@geovanny/shared';
+import { Link } from 'react-router-dom';
+import {
+  D,
+  MONEDAS,
+  cantidadTexto,
+  conUnidad,
+  formatMoney,
+  formatRate,
+  money,
+  type Moneda,
+} from '@geovanny/shared';
 import type { ApiError } from '../../lib/api';
 import { api } from '../../lib/api';
 import { Aviso, Boton, Campo, Cargando, Tarjeta, Vacio } from '../../components/ui/base';
@@ -118,27 +128,9 @@ export function Todo() {
         ) : (
           <>
             <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-              {informe.ventas.porProducto.map((fila) => {
-                const enMonedas = MONEDAS.filter((m) => !D(fila.vendido[m]).isZero());
-                return (
-                  <li key={fila.nombre} className="flex items-start justify-between gap-3 py-2.5">
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-semibold">{fila.nombre}</span>
-                      <span className="tabular text-xs opacity-60">
-                        {conUnidad(fila.cantidad, fila.unidad)} en {fila.registros}{' '}
-                        {fila.registros === 1 ? 'venta' : 'ventas'}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-right">
-                      {enMonedas.map((m) => (
-                        <span key={m} className="tabular block text-sm font-semibold">
-                          {formatMoney(money(fila.vendido[m], m))}
-                        </span>
-                      ))}
-                    </span>
-                  </li>
-                );
-              })}
+              {informe.ventas.porProducto.map((fila) => (
+                <FilaProducto key={fila.nombre} fila={fila} />
+              ))}
             </ul>
 
             <div className="mt-2 border-t border-slate-200 pt-2 dark:border-slate-800">
@@ -170,7 +162,16 @@ export function Todo() {
           bolsa={informe.vieneDeAntes.sobrante}
           monedas={monedas}
           signo="+"
-          ayuda={informe.vieneDeAntes.observacion ?? 'Sin cierre anterior: arranca en cero'}
+          ayuda={
+            informe.vieneDeAntes.sinAncla
+              ? 'Arrastrado solo desde el primer movimiento'
+              : [
+                  informe.vieneDeAntes.observacion,
+                  'Lo que contaste, más todo lo movido desde entonces',
+                ]
+                  .filter(Boolean)
+                  .join(' · ')
+          }
         />
         <Fila
           texto="Ventas cobradas hoy"
@@ -262,8 +263,168 @@ export function Todo() {
         </p>
       </Tarjeta>
 
+      {(informe.movimientos.ventas.length > 0 || informe.movimientos.abonos.length > 0) && (
+        <Tarjeta titulo="Todo lo del día, con nombre">
+          {informe.movimientos.ventas.length > 0 && (
+            <>
+              <p className="mb-1 text-xs font-semibold tracking-wide uppercase opacity-50">
+                Ventas ({informe.movimientos.ventas.length})
+              </p>
+              <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                {informe.movimientos.ventas.map((venta) => {
+                  const debe = D(venta.aDeber).greaterThan(0);
+                  return (
+                    <li key={venta.id} className="py-2">
+                      <Link
+                        to={`/ventas/${venta.id}`}
+                        className="flex items-start justify-between gap-3"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-medium">
+                            {venta.persona}
+                            {venta.deMostrador && (
+                              <span className="ml-1 text-xs font-normal opacity-50">mostrador</span>
+                            )}
+                          </span>
+                          <span className="tabular block truncate text-xs opacity-60">
+                            {venta.productos
+                              .map((p) => `${cantidadTexto(p.cantidad)} ${p.nombre.toLowerCase()}`)
+                              .join(' · ')}
+                          </span>
+                          <span className="text-xs opacity-40">
+                            {venta.numero} · {venta.hora}
+                          </span>
+                        </span>
+                        <span className="shrink-0 text-right">
+                          <span className="tabular block text-sm font-semibold">
+                            {formatMoney(money(venta.total, venta.moneda))}
+                          </span>
+                          <span
+                            className={`tabular block text-xs ${debe ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}
+                          >
+                            {debe ? `fiado ${formatMoney(money(venta.aDeber, venta.moneda))}` : 'pagada'}
+                          </span>
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+
+          {informe.movimientos.abonos.length > 0 && (
+            <>
+              <p className="mt-3 mb-1 text-xs font-semibold tracking-wide uppercase opacity-50">
+                Abonos ({informe.movimientos.abonos.length})
+              </p>
+              <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                {informe.movimientos.abonos.map((abono) => (
+                  <li key={abono.id} className="flex items-baseline justify-between gap-3 py-2">
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">{abono.persona}</span>
+                      <span className="text-xs opacity-50">
+                        {abono.numero} · {abono.hora} · {abono.metodo.toLowerCase()}
+                      </span>
+                    </span>
+                    <span className="tabular shrink-0 text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                      + {formatMoney(money(abono.monto, abono.moneda))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </Tarjeta>
+      )}
+
+      {informe.tasa && (
+        <p className="text-center text-xs opacity-40">
+          {formatRate('USD', 'VES', informe.tasa.usdVes)} ·{' '}
+          {formatRate('USD', 'COP', informe.tasa.usdCop)}
+          {informe.tasaFijada && ' · fijada al cerrar el día'}
+        </p>
+      )}
+
       <FormularioCierre informe={informe} monedas={monedas} onListo={refrescar} />
     </div>
+  );
+}
+
+/**
+ * Un producto del día, que se abre y enseña quién se lo llevó.
+ *
+ * El total dice "salieron 61 bultos". Para trabajar hace falta saber que 12 se
+ * los llevó Memín fiados y 8 se pagaron en el mostrador: un número grande sin
+ * nombres detrás no se puede perseguir.
+ */
+function FilaProducto({ fila }: { fila: InformeTodo['ventas']['porProducto'][number] }) {
+  const [abierto, setAbierto] = useState(false);
+  const enMonedas = MONEDAS.filter((m) => !D(fila.vendido[m]).isZero());
+  const fiadoEn = MONEDAS.filter((m) => D(fila.fiado[m]).greaterThan(0));
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => setAbierto((v) => !v)}
+        aria-expanded={abierto}
+        className="flex w-full items-start justify-between gap-3 py-2.5 text-left"
+      >
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-semibold">
+            {fila.nombre}
+            <span className="ml-1 text-xs font-normal opacity-40">{abierto ? '▾' : '▸'}</span>
+          </span>
+          <span className="tabular text-xs opacity-60">
+            {conUnidad(fila.cantidad, fila.unidad)} en {fila.registros}{' '}
+            {fila.registros === 1 ? 'venta' : 'ventas'}
+          </span>
+          {fiadoEn.length > 0 && (
+            <span className="tabular block text-xs text-amber-600 dark:text-amber-400">
+              fiado {fiadoEn.map((m) => formatMoney(money(fila.fiado[m], m))).join(' · ')}
+            </span>
+          )}
+        </span>
+        <span className="shrink-0 text-right">
+          {enMonedas.map((m) => (
+            <span key={m} className="tabular block text-sm font-semibold">
+              {formatMoney(money(fila.vendido[m], m))}
+            </span>
+          ))}
+        </span>
+      </button>
+
+      {abierto && (
+        <ul className="mb-2 space-y-1 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800/50">
+          {fila.ventas.map((venta, indice) => {
+            const debe = D(venta.aDeber).greaterThan(0);
+            return (
+              <li key={`${venta.id}-${indice}`} className="flex items-baseline justify-between gap-2 text-xs">
+                <span className="min-w-0">
+                  <span className="font-medium">{venta.persona}</span>
+                  {venta.deMostrador && <span className="ml-1 opacity-50">mostrador</span>}
+                  <span className="tabular block opacity-60">
+                    {conUnidad(venta.cantidad, fila.unidad)} ×{' '}
+                    {formatMoney(money(venta.precio, venta.moneda))} · {venta.hora}
+                  </span>
+                </span>
+                <span className="shrink-0 text-right">
+                  <span className="tabular block font-semibold">
+                    {formatMoney(money(venta.subtotal, venta.moneda))}
+                  </span>
+                  <span
+                    className={`tabular block ${debe ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}
+                  >
+                    {debe ? `debe ${formatMoney(money(venta.aDeber, venta.moneda))}` : 'pagado'}
+                  </span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </li>
   );
 }
 
@@ -287,7 +448,19 @@ function FilaGasto({
   onListo: () => void;
 }) {
   const [confirmando, setConfirmando] = useState(false);
+  const [observacion, setObservacion] = useState(gasto.observacion ?? '');
   const [error, setError] = useState<string | null>(null);
+
+  /** Se guarda al salir del campo: escribir no debe pedir tocar un botón. */
+  const anotar = useMutation({
+    mutationFn: () =>
+      api(`/gastos/${gasto.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ observacion }),
+      }),
+    onSuccess: onListo,
+    onError: (e: ApiError) => setError(e.message),
+  });
 
   const quitar = useMutation({
     mutationFn: () =>
@@ -311,8 +484,17 @@ function FilaGasto({
           </span>
         </span>
         <span className="flex shrink-0 items-center gap-1">
-          <span className="tabular text-sm">
-            − {formatMoney(money(gasto.monto, gasto.moneda))}
+          <span className="text-right">
+            <span className="tabular block text-sm">
+              − {formatMoney(money(gasto.monto, gasto.moneda))}
+            </span>
+            {/* Lo mismo en las otras monedas, con la tasa del día en que se
+                anotó: un gasto viejo no se revalúa porque hoy el dólar cambió. */}
+            {MONEDAS.filter((m) => m !== gasto.moneda && !D(gasto.eq[m]).isZero()).map((m) => (
+              <span key={m} className="tabular block text-xs opacity-50">
+                {formatMoney(money(gasto.eq[m], m))}
+              </span>
+            ))}
           </span>
           {puedeQuitar && !confirmando && (
             <button
@@ -326,6 +508,24 @@ function FilaGasto({
           )}
         </span>
       </div>
+
+      {/* La observación se escribe cuando hay un momento, no al vuelo. */}
+      {puedeQuitar && !confirmando && (
+        <input
+          type="text"
+          value={observacion}
+          onChange={(evento) => setObservacion(evento.target.value)}
+          onBlur={() => {
+            if (observacion.trim() !== (gasto.observacion ?? '').trim()) anotar.mutate();
+          }}
+          placeholder="Observación…"
+          aria-label={`Observación de ${gasto.descripcion || gasto.categoria}`}
+          className="mt-1 w-full border-b border-dashed border-slate-300 bg-transparent pb-0.5 text-xs outline-none placeholder:opacity-40 focus:border-solid dark:border-slate-700"
+        />
+      )}
+      {!puedeQuitar && gasto.observacion && (
+        <p className="mt-1 text-xs opacity-60">{gasto.observacion}</p>
+      )}
 
       {confirmando && (
         <div className="mt-2 space-y-2">

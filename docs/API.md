@@ -104,12 +104,21 @@ Clientes y proveedores comparten endpoint: son la misma entidad.
 | GET | `/deudas` | `?tipo=CLIENTE\|PROVEEDOR` — reporte: un renglón por persona con saldo |
 | GET | `/:id/cuenta` | **Estado de cuenta**: la persona, sus operaciones y sus abonos |
 
-`saldos` trae una deuda por moneda. Negativo significa saldo a favor.
+`saldos` trae una deuda por moneda. Negativo significa saldo a favor. En un
+**cliente**, positivo es lo que te debe; en un **proveedor**, lo que le debes: el
+signo se lee igual, lo que cambia es de qué lado está la deuda.
 
-`GET /deudas` devuelve `{generado, tipo, filas, total}`. Cada fila trae solo
-`nombre`, `telefono` y `saldos` por moneda: es la hoja con la que se sale a
-cobrar —o a pagar—, y ahí el detalle venta a venta estorba. Ese detalle ya está
-en `/:id/cuenta`.
+Crear o cambiar una persona pide `customer:write` o `supplier:write` según su
+tipo, no un permiso único para las dos cosas.
+
+`GET /deudas` devuelve `{generado, tipo, filas, total}`. Cada fila trae `nombre`,
+`telefono`, `saldos` por moneda y **`desde` por moneda**: la fecha del documento
+pendiente más viejo de esa moneda.
+
+Ese `desde` es lo que convierte una lista de nombres en una hoja de cobro. No es
+lo mismo deber cien dólares desde el martes que deberlos desde hace tres meses, y
+ese dato decide a quién se llama primero — por eso el reporte se ordena por
+antigüedad, no por monto. El detalle venta a venta sigue en `/:id/cuenta`.
 
 `tipo=PROVEEDOR` incluye también a los de `TRANSPORTE`: para quien paga, son
 gente a la que se le debe igual.
@@ -286,8 +295,11 @@ se cuentan por separado. Cada cifra viene en la moneda en que se pactó o se pag
 
 `GET /` devuelve:
 
-- `vieneDeAntes` — el sobrante del **último cierre anterior** a ese día. No el de
-  ayer exacto: si el domingo no se abrió, el lunes arranca con lo del sábado.
+- `vieneDeAntes` — **se arrastra solo**: el último conteo escrito a mano más
+  todo lo movido desde entonces hasta la víspera. El conteo deja de ser una
+  obligación diaria y pasa a ser un ancla: cuando se escribe corrige la deriva,
+  y cuando no, el sistema sigue la cuenta. Trae `desdeElConteo` (lo acumulado) y
+  `sinAncla` (nadie ha contado nunca).
 - `ventas` — `vendido`, `contado`, `fiado` y el desglose `porProducto`. El
   contado sale de `pagadoInicial`, que no cambia, así que el cierre de un día
   pasado no se mueve cuando alguien abona una venta vieja.
@@ -299,6 +311,16 @@ se cuentan por separado. Cada cifra viene en la moneda en que se pactó o se pag
 Los gastos son los de siempre (`POST /api/gastos` con la `fecha` de ese día):
 no hay un segundo sitio donde guardarlos, porque partiría en dos el reporte del
 mes.
+
+- `movimientos` — las ventas y los abonos del día **con nombre**. Los totales
+  dicen cuánto; esto dice con quién.
+- `ventas.porProducto[].ventas` — quién se llevó cada producto, cuánto pagó y
+  cuánto quedó a deber. Y `fiado` por producto.
+- `salidas.gastos[].eq` — lo que costó el gasto en cada moneda, con la tasa del
+  día en que se anotó. Y `observacion`, editable con `PATCH /api/gastos/:id`.
+- `tasa` y `tasaFijada` — la tasa con la que se lee el día. **Al cerrar, queda
+  clavada en el cierre**: ese reporte da los mismos números para siempre por
+  mucho que el dólar se mueva después (RC-03).
 
 `POST /cierre` es idempotente por día (upsert) y **no valida** lo contado contra
 lo calculado a propósito: si contó 20 mil de menos, eso es un dato, no un error
@@ -342,8 +364,22 @@ La respuesta trae `montoAplicado` (cuánto bajó la deuda, en su moneda),
 | Método | Ruta | Qué hace |
 |---|---|---|
 | GET | `/` | `?desde=` |
-| POST | `/` | `{categoria, tipo, descripcion, monto, moneda}` |
-| POST | `/:id/anular` | |
+| GET | `/nombres` | Los nombres ya usados, del más repetido al menos |
+| POST | `/` | `{categoria, tipo, descripcion, observacion?, monto, moneda, fecha?, cajaId?}` |
+| PATCH | `/:id` | `{observacion}` — texto suelto, no mueve dinero |
+| POST | `/:id/anular` | `{motivo?}` — **devuelve la plata a la caja de donde salió** |
+
+Crear un gasto y sacarlo de la caja va en **una sola transacción**: un gasto sin
+su salida de caja hace que el cierre cuadre de mentira, y una salida sin gasto
+deja plata que se fue sin que nadie sepa en qué.
+
+Anular devuelve el dinero a la **caja concreta** de la que salió —la busca por el
+movimiento original, no coge la primera de esa moneda— y no se puede hacer dos
+veces.
+
+La `descripcion` es el nombre del gasto (luisma, el carro, la caleta) y
+`/nombres` los ofrece ya escritos: teclearlos a mano cada vez es lo que produce
+"Luisma", "luisma " y "Luizma" como tres gastos distintos.
 
 ---
 

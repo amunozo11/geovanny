@@ -13,6 +13,7 @@ const gastoSchema = z.object({
   categoria: z.string().min(1, 'Elige una categoría').max(40),
   tipo: z.enum(['FIJO', 'VARIABLE']).default('VARIABLE'),
   descripcion: z.string().max(200).default(''),
+  observacion: z.string().max(500).default(''),
   monto: z.string().regex(/^\d+(\.\d+)?$/, 'Escribe un número'),
   moneda: z.enum(MONEDAS),
   fecha: z.string().datetime().optional(),
@@ -59,6 +60,15 @@ gastosRouter.post('/', requirePermission('expense:write'), async (req, res) => {
   const entrada = gastoSchema.parse(req.body);
   const gasto = await gastos.registrarGasto({ ...entrada, creadoPor: req.user!.id });
   res.status(201).json({ data: gasto });
+});
+
+/** La observación se escribe después y no mueve dinero: se edita en el sitio. */
+gastosRouter.patch('/:id', requirePermission('expense:write'), async (req, res) => {
+  const { observacion } = z
+    .object({ observacion: z.string().max(500).default('') })
+    .parse(req.body);
+
+  res.json({ data: await gastos.anotarObservacion(String(req.params.id), observacion) });
 });
 
 /** Quitar un gasto mal anotado: devuelve la plata a la caja de donde salió. */

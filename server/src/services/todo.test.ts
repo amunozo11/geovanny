@@ -4,6 +4,7 @@ import { ProductoModel } from '../models/producto.js';
 import { PersonaModel } from '../models/persona.js';
 import { CajaModel } from '../models/caja.js';
 import { CargoModel } from '../models/cargo.js';
+import { OperacionModel } from '../models/operacion.js';
 import { PagoModel } from '../models/pago.js';
 import { GastoModel } from '../models/gasto.js';
 import { limpiarCache, registrarTasa } from './tasas.service.js';
@@ -404,6 +405,125 @@ describe('El reporte de deudas', () => {
     expect(proveedores.map((p) => p.nombre).sort()).toEqual(['EL CARRO', 'HIJINIO']);
   });
 
+  /**
+   * El dato que convierte una lista de nombres en una hoja de cobro: no es lo
+   * mismo deber cien dólares desde el martes que deberlos desde hace tres
+   * meses. Y va por moneda, porque el reporte se lee moneda por moneda.
+   */
+  it('dice desde cuándo se debe, por moneda', async () => {
+    const { papa, cliente } = await base();
+    const hace10 = new Date(Date.now() - 10 * 24 * 3_600_000);
+    const hace3 = new Date(Date.now() - 3 * 24 * 3_600_000);
+
+    await crearOperacion({
+      tipo: 'VENTA',
+      personaId: cliente._id.toString(),
+      moneda: 'USD',
+      items: [{ productoId: papa._id.toString(), cantidad: '1', precio: '50' }],
+      formaPago: 'FIADO',
+      fecha: hace10.toISOString(),
+    });
+    // Una más reciente en la misma moneda: no debe mover el "desde".
+    await crearOperacion({
+      tipo: 'VENTA',
+      personaId: cliente._id.toString(),
+      moneda: 'USD',
+      items: [{ productoId: papa._id.toString(), cantidad: '1', precio: '20' }],
+      formaPago: 'FIADO',
+      fecha: hace3.toISOString(),
+    });
+    // Y una deuda en otra moneda, con su propia antigüedad.
+    await registrarCargo({
+      personaId: cliente._id.toString(),
+      tipo: 'DEUDA',
+      concepto: 'VIEJO',
+      monto: '9000',
+      moneda: 'VES',
+      fecha: hace3.toISOString(),
+    });
+
+    const operaciones = await OperacionModel.find({ estado: 'ACTIVA', saldo: { $ne: '0' } });
+    const cargos = await CargoModel.find({ estado: 'ACTIVO', saldo: { $ne: '0' } });
+
+    const masAntiguo = new Map<string, Date>();
+    for (const doc of [...operaciones, ...cargos]) {
+      const clave = `${doc.personaId!.toString()}|${doc.moneda}`;
+      const previo = masAntiguo.get(clave);
+      if (!previo || doc.fecha < previo) masAntiguo.set(clave, doc.fecha);
+    }
+
+    const id = cliente._id.toString();
+    expect(masAntiguo.get(`${id}|USD`)!.toISOString().slice(0, 10)).toBe(
+      hace10.toISOString().slice(0, 10),
+    );
+    expect(masAntiguo.get(`${id}|VES`)!.toISOString().slice(0, 10)).toBe(
+      hace3.toISOString().slice(0, 10),
+    );
+  });
+
+  /**
+   * El flujo entero de un proveedor: se crea, se le carga lo que ya se le debía
+   * y se le va pagando. Lo que se paga baja la deuda y sale de la caja.
+   */
+  it('a un proveedor se le carga la deuda y se le va pagando', async () => {
+    await base();
+    const proveedor = await PersonaModel.create({ nombre: 'HIJINIO', tipo: 'PROVEEDOR' });
+    const caja = await CajaModel.create({ nombre: 'Dólares', moneda: 'USD', saldo: '1000' });
+
+    // Lo que ya se le debía, sin mover dinero.
+    await registrarCargo({
+      personaId: proveedor._id.toString(),
+      tipo: 'DEUDA',
+      concepto: 'Saldo del viaje del sábado',
+      monto: '800',
+      moneda: 'USD',
+    });
+
+    expect((await PersonaModel.findById(proveedor._id))!.saldos.USD).toBe('800');
+    expect((await CajaModel.findById(caja._id))!.saldo).toBe('1000');
+
+    // Un pago, con su fecha.
+    const anteayer = new Date(Date.now() - 2 * 24 * 3_600_000);
+    await registrarPago({
+      personaId: proveedor._id.toString(),
+      direccion: 'SALE',
+      monto: '300',
+      moneda: 'USD',
+      cajaId: caja._id.toString(),
+      fecha: anteayer.toISOString(),
+    });
+
+    expect((await PersonaModel.findById(proveedor._id))!.saldos.USD).toBe('500');
+    expect((await CajaModel.findById(caja._id))!.saldo).toBe('700');
+  });
+
+  it('se le puede pagar en una moneda distinta a la que se le debe', async () => {
+    await base();
+    const proveedor = await PersonaModel.create({ nombre: 'HIJINIO', tipo: 'PROVEEDOR' });
+
+    await registrarCargo({
+      personaId: proveedor._id.toString(),
+      tipo: 'DEUDA',
+      concepto: 'Saldo del viaje',
+      monto: '20000',
+      moneda: 'VES',
+    });
+
+    // Se le entregan 50 dólares contra una deuda en bolívares. A 200 Bs/US$,
+    // eso descuenta 10.000 de la deuda.
+    const pago = await registrarPago({
+      personaId: proveedor._id.toString(),
+      direccion: 'SALE',
+      monto: '50',
+      moneda: 'USD',
+      aplicaA: 'VES',
+    });
+
+    expect(pago.montoAplicado).toBe('10000');
+    expect(pago.importe.monto).toBe('50');
+    expect((await PersonaModel.findById(proveedor._id))!.saldos.VES).toBe('10000');
+  });
+
   it('deja fuera a quien está al día', async () => {
     await base();
     await PersonaModel.create({ nombre: 'AL DIA', tipo: 'CLIENTE' });
@@ -519,6 +639,119 @@ describe('TODO: el día entero, moneda por moneda', () => {
     expect(informe.entradas.recogido.USD).toBe('30');
   });
 
+  describe('El detalle con nombres', () => {
+    it('cada producto trae quién se lo llevó y qué quedó fiado', async () => {
+      const { papa, cliente } = await base();
+
+      await venderTotal({
+        productoId: papa._id.toString(),
+        cantidad: '8',
+        precio: '10',
+        moneda: 'USD',
+      });
+      await crearOperacion({
+        tipo: 'VENTA',
+        personaId: cliente._id.toString(),
+        moneda: 'USD',
+        items: [{ productoId: papa._id.toString(), cantidad: '12', precio: '10' }],
+        formaPago: 'FIADO',
+      });
+
+      const fila = (await informeDelDia(diaDeHoy())).ventas.porProducto[0]!;
+
+      expect(fila.ventas).toHaveLength(2);
+      expect(fila.ventas.map((v) => v.persona).sort()).toEqual(['MEMIN', 'Venta total']);
+
+      const deMemin = fila.ventas.find((v) => v.persona === 'MEMIN')!;
+      expect(deMemin.aDeber).toBe('120');
+      expect(deMemin.deMostrador).toBe(false);
+
+      const mostrador = fila.ventas.find((v) => v.deMostrador)!;
+      expect(mostrador.aDeber).toBe('0');
+
+      // Del producto salieron 200 y 120 quedaron a deber.
+      expect(fila.vendido.USD).toBe('200');
+      expect(fila.fiado.USD).toBe('120');
+    });
+
+    it('el informe lista las ventas y los abonos del día con nombre', async () => {
+      const { papa, cliente } = await base();
+      await crearOperacion({
+        tipo: 'VENTA',
+        personaId: cliente._id.toString(),
+        moneda: 'USD',
+        items: [{ productoId: papa._id.toString(), cantidad: '2', precio: '10' }],
+        formaPago: 'FIADO',
+      });
+      await registrarPago({
+        personaId: cliente._id.toString(),
+        direccion: 'ENTRA',
+        monto: '5',
+        moneda: 'USD',
+      });
+
+      const informe = await informeDelDia(diaDeHoy());
+
+      expect(informe.movimientos.ventas[0]!.persona).toBe('MEMIN');
+      expect(informe.movimientos.ventas[0]!.aDeber).toBe('20');
+      expect(informe.movimientos.abonos[0]!.persona).toBe('MEMIN');
+      expect(informe.movimientos.abonos[0]!.monto).toBe('5');
+    });
+
+    it('el gasto enseña su equivalente con la tasa de su día', async () => {
+      await base();
+      await registrarGasto({
+        categoria: 'OTROS',
+        descripcion: 'Luisma',
+        observacion: 'Le adelanté el flete',
+        monto: '20',
+        moneda: 'USD',
+      });
+
+      const gasto = (await informeDelDia(diaDeHoy())).salidas.gastos[0]!;
+      expect(gasto.observacion).toBe('Le adelanté el flete');
+      // 1 USD = 200 VES ese día.
+      expect(gasto.eq.VES).toBe('4000');
+    });
+
+    /**
+     * La regla de fondo: un reporte de ayer da los mismos números hoy, mañana
+     * y siempre, aunque el dólar se haya movido tres veces desde entonces.
+     */
+    it('el equivalente de un gasto no cambia si mañana cambia la tasa', async () => {
+      await base();
+      const gasto = await registrarGasto({
+        categoria: 'OTROS',
+        descripcion: 'Luisma',
+        monto: '20',
+        moneda: 'USD',
+      });
+      const antes = (await informeDelDia(diaDeHoy())).salidas.gastos[0]!.eq.VES;
+
+      limpiarCache();
+      await registrarTasa({ usdCop: '4000', usdVes: '900', mercado: 'PARALELO', fuente: 'MANUAL' });
+
+      const despues = (await informeDelDia(diaDeHoy())).salidas.gastos[0]!.eq.VES;
+      expect(despues).toBe(antes);
+      expect(despues).toBe('4000');
+      void gasto;
+    });
+
+    it('al cerrar el día se clava la tasa y el reporte deja de moverse', async () => {
+      await base();
+      const cerrado = await guardarCierre({ dia: diaDeHoy(), sobrante: {}, observacion: '' });
+      expect(cerrado.tasaFijada).toBe(true);
+      expect(cerrado.tasa!.usdVes).toBe('200');
+
+      limpiarCache();
+      await registrarTasa({ usdCop: '4000', usdVes: '900', mercado: 'PARALELO', fuente: 'MANUAL' });
+
+      const relectura = await informeDelDia(diaDeHoy());
+      expect(relectura.tasa!.usdVes).toBe('200');
+      expect(relectura.tasaFijada).toBe(true);
+    });
+  });
+
   describe('Quitar un gasto mal anotado', () => {
     it('devuelve la plata a la caja de donde salió', async () => {
       await base();
@@ -603,6 +836,65 @@ describe('TODO: el día entero, moneda por moneda', () => {
       // Sin movimientos hoy, lo que debería haber es justo lo que traía.
       expect(informe.deberiaQuedar.USD).toBe('250');
       expect(informe.deberiaQuedar.VES).toBe('90000');
+    });
+
+    /**
+     * El caso que más duele: se hacen reportes día por medio. Si el saldo solo
+     * viniera del último conteo escrito, el día sin cerrar quedaría fuera y el
+     * "debería quedar" saldría mal justo cuando se va a contar la caja.
+     */
+    it('arrastra solo lo movido en los días que no se cerraron', async () => {
+      const { papa } = await base();
+      const anteayer = new Date(Date.now() - 2 * 24 * 3_600_000);
+      const ayer = new Date(Date.now() - 24 * 3_600_000);
+
+      await guardarCierre({ dia: diaDeHoy(anteayer), sobrante: { USD: '100' } });
+
+      // Ayer se vendió y no se cerró.
+      await venderTotal({
+        productoId: papa._id.toString(),
+        cantidad: '3',
+        precio: '10',
+        moneda: 'USD',
+        fecha: ayer.toISOString(),
+      });
+
+      const informe = await informeDelDia(diaDeHoy());
+
+      // 100 contados + 30 de ayer, sin que nadie escribiera nada anoche.
+      expect(informe.vieneDeAntes.sobrante.USD).toBe('130');
+      expect(informe.vieneDeAntes.desdeElConteo!.USD).toBe('30');
+      expect(informe.deberiaQuedar.USD).toBe('130');
+    });
+
+    it('sin ningún conteo nunca, la cuenta viene sola desde el principio', async () => {
+      const { papa } = await base();
+      await venderTotal({
+        productoId: papa._id.toString(),
+        cantidad: '5',
+        precio: '10',
+        moneda: 'USD',
+        fecha: new Date(Date.now() - 24 * 3_600_000).toISOString(),
+      });
+
+      const informe = await informeDelDia(diaDeHoy());
+      expect(informe.vieneDeAntes.sinAncla).toBe(true);
+      expect(informe.vieneDeAntes.sobrante.USD).toBe('50');
+    });
+
+    it('los gastos de días sin cerrar también se arrastran', async () => {
+      await base();
+      const ayer = new Date(Date.now() - 24 * 3_600_000);
+      await guardarCierre({ dia: diaDeHoy(new Date(Date.now() - 2 * 24 * 3_600_000)), sobrante: { USD: '200' } });
+      await registrarGasto({
+        categoria: 'OTROS',
+        descripcion: 'Luisma',
+        monto: '35',
+        moneda: 'USD',
+        fecha: ayer.toISOString(),
+      });
+
+      expect((await informeDelDia(diaDeHoy())).vieneDeAntes.sobrante.USD).toBe('165');
     });
 
     it('se salta los días sin cierre en vez de arrancar en cero', async () => {

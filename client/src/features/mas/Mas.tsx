@@ -16,6 +16,16 @@ const OPCIONES = [
     titulo: 'Ventas totales',
     texto: 'Lo del mostrador: producto, cantidad y precio, sin cliente',
   },
+  {
+    a: '/proveedores',
+    titulo: 'Proveedores',
+    texto: 'Quién es, cuánto le debes y los pagos que le has hecho',
+  },
+  {
+    a: '/proveedores/deudas',
+    titulo: 'Cuentas por pagar',
+    texto: 'Lo que le debes a cada proveedor, listo para PDF',
+  },
   { a: '/mas/dias', titulo: 'Por días', texto: 'Todo lo que se registró cada día' },
   { a: '/mas/comprar', titulo: 'Registrar viaje', texto: 'Mercancía que entra, con su cargue' },
   { a: '/mas/cajas', titulo: 'Cajas', texto: 'Dónde está el dinero y cuánto hay' },
@@ -50,16 +60,7 @@ export function Mas() {
         ))}
       </div>
 
-      <Tarjeta
-        titulo="A quién le debes"
-        pie={
-          conDeuda.length > 0 ? (
-            <Link to="/proveedores/deudas" className="underline">
-              Reporte para imprimir
-            </Link>
-          ) : undefined
-        }
-      >
+      <Tarjeta titulo="A quién le debes">
         {conDeuda.length === 0 ? (
           <p className="py-2 text-sm opacity-60">No le debes a ningún proveedor.</p>
         ) : (

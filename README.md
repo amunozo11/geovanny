@@ -86,6 +86,7 @@ en bolívares, son dos cuentas distintas, como en el cuaderno.
 | **Ventas** | Todas las ventas agrupadas por día; se abre cualquiera y se ve entera: qué se llevó, a cómo, cómo quedó y con qué tasa |
 | **Por días** | Todo lo que se registró cada día, en orden y con sus totales |
 | **Cajas** | Dónde está el dinero: efectivo por moneda, banco, pago móvil. Conteo y cambio de divisa |
+| **Proveedores** | Crearlos, cargarles lo que se les debe y registrar los pagos con su fecha y su moneda. Reporte **individual** y **general** en PDF |
 | **Más** | Registrar viaje (compras), tasa del día, gastos y a quién le debes, con su reporte **Cuentas por pagar** en PDF |
 
 ---

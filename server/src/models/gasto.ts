@@ -12,6 +12,12 @@ export interface Gasto {
   categoria: string;
   tipo: 'FIJO' | 'VARIABLE';
   descripcion: string;
+  /**
+   * Lo que hay que recordar de ese gasto y no cabe en el nombre: a quién se le
+   * dio, por qué salió más caro, qué quedó pendiente. Se escribe después, sin
+   * frenar la anotación.
+   */
+  observacion: string;
   importe: Importe;
   fecha: Date;
   /** Operación relacionada, si el gasto pertenece a un viaje concreto. */
@@ -26,6 +32,7 @@ const gastoSchema = new Schema<Gasto>(
     categoria: { type: String, required: true },
     tipo: { type: String, enum: ['FIJO', 'VARIABLE'], default: 'VARIABLE' },
     descripcion: { type: String, default: '' },
+    observacion: { type: String, default: '' },
     importe: { type: importeSchema, required: true },
     fecha: { type: Date, default: () => new Date() },
     operacionId: { type: Schema.Types.ObjectId, ref: 'Operacion', default: null },

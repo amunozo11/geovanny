@@ -194,13 +194,33 @@ export interface Cargo {
 export type PorMoneda = Record<Moneda, string>;
 
 /** El informe del módulo TODO: el día entero, moneda por moneda. */
+/** Una venta detrás de un producto: quién se lo llevó y qué quedó a deber. */
+export interface VentaDeProducto {
+  id: string;
+  numero: string;
+  hora: string;
+  persona: string;
+  deMostrador: boolean;
+  cantidad: string;
+  precio: string;
+  subtotal: string;
+  moneda: Moneda;
+  aDeber: string;
+}
+
 export interface InformeTodo {
   dia: string;
   esHoy: boolean;
+  /** La tasa con la que se lee este día. Si está fijada, ya no cambia. */
+  tasa: { usdCop: string; usdVes: string; mercado: string; fuente: string; at: string } | null;
+  tasaFijada: boolean;
   vieneDeAntes: {
     dia: string | null;
     sobrante: PorMoneda;
     observacion: string | null;
+    /** Lo acumulado desde el último conteo a mano. */
+    desdeElConteo?: PorMoneda;
+    sinAncla?: boolean;
   };
   ventas: {
     registros: number;
@@ -213,6 +233,31 @@ export interface InformeTodo {
       cantidad: string;
       registros: number;
       vendido: PorMoneda;
+      fiado: PorMoneda;
+      ventas: VentaDeProducto[];
+    }[];
+  };
+  movimientos: {
+    ventas: {
+      id: string;
+      numero: string;
+      hora: string;
+      persona: string;
+      deMostrador: boolean;
+      productos: { nombre: string; unidad: string; cantidad: string; precio: string }[];
+      moneda: Moneda;
+      total: string;
+      cobrado: string;
+      aDeber: string;
+    }[];
+    abonos: {
+      id: string;
+      numero: string;
+      hora: string;
+      persona: string;
+      monto: string;
+      moneda: Moneda;
+      metodo: string;
     }[];
   };
   entradas: { contado: PorMoneda; cobrado: PorMoneda; recogido: PorMoneda };
@@ -227,8 +272,11 @@ export interface InformeTodo {
       hora: string;
       categoria: string;
       descripcion: string;
+      observacion: string;
       monto: string;
       moneda: Moneda;
+      /** Lo que costó en cada moneda, con la tasa del día en que se anotó. */
+      eq: PorMoneda;
     }[];
     pagos: { id: string; numero: string; hora: string; persona: string; monto: string; moneda: Moneda }[];
     prestamos: {

@@ -21,6 +21,18 @@ export interface Cierre {
   /** Lo que se contó al cerrar, por moneda. */
   sobrante: Record<string, string>;
   observacion: string;
+  /**
+   * La tasa con la que se cerró el día. Congelada aquí para que el reporte de
+   * ese día dé siempre los mismos números, por mucho que el dólar se mueva
+   * después (RC-03).
+   */
+  tasa: {
+    usdCop: string;
+    usdVes: string;
+    mercado: string;
+    fuente: string;
+    at: string;
+  } | null;
   cerradoPor: Types.ObjectId | null;
 }
 
@@ -32,6 +44,19 @@ const cierreSchema = new Schema<Cierre>(
       default: () => Object.fromEntries(MONEDAS.map((m) => [m, '0'])),
     },
     observacion: { type: String, default: '' },
+    tasa: {
+      type: new Schema(
+        {
+          usdCop: String,
+          usdVes: String,
+          mercado: String,
+          fuente: String,
+          at: String,
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
     cerradoPor: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   },
   { timestamps: true, minimize: false },

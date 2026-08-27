@@ -11,6 +11,7 @@ export interface RegistrarGasto {
   categoria: string;
   tipo?: 'FIJO' | 'VARIABLE';
   descripcion?: string;
+  observacion?: string;
   monto: string;
   moneda: Moneda;
   fecha?: string;
@@ -42,6 +43,7 @@ export async function registrarGasto(entrada: RegistrarGasto) {
             categoria: entrada.categoria,
             tipo: entrada.tipo ?? 'VARIABLE',
             descripcion: entrada.descripcion ?? '',
+            observacion: entrada.observacion ?? '',
             // El gasto guarda su valor en las tres monedas, como todo (§17).
             importe: crearImporte(entrada.monto, entrada.moneda, tasa),
             fecha: entrada.fecha ? new Date(entrada.fecha) : new Date(),
@@ -129,4 +131,21 @@ export async function anularGasto(id: string, motivo: string, usuarioId?: string
   }
 
   return GastoModel.findById(id);
+}
+
+/**
+ * La observación de un gasto, escrita después.
+ *
+ * Es texto suelto: no mueve dinero, así que se edita en el sitio sin anular
+ * nada. Anotar el gasto tiene que ser rápido —se hace mientras se despacha—, y
+ * el porqué se escribe con calma cuando hay un momento.
+ */
+export async function anotarObservacion(id: string, observacion: string) {
+  const gasto = await GastoModel.findByIdAndUpdate(
+    id,
+    { $set: { observacion: observacion.trim() } },
+    { new: true },
+  );
+  if (!gasto) throw new NotFoundError('No se encontró el gasto.');
+  return gasto;
 }

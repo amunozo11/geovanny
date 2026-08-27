@@ -9,7 +9,7 @@ import { SelectorCaja } from '../cajas/SelectorCaja';
 import { Aviso, Boton, Campo, Cargando, Seleccion, Tarjeta, Vacio } from '../../components/ui/base';
 import { CampoDinero } from '../../components/ui/CampoDinero';
 import { CampoCantidad } from '../../components/ui/CampoCantidad';
-import { CampoFecha, comoInstante } from '../../components/ui/CampoFecha';
+import { CampoFecha, comoInstante, hoy } from '../../components/ui/CampoFecha';
 import { useAuth } from '../auth/AuthContext';
 import type { Cargo, Operacion, Pago, Persona } from '../../lib/tipos';
 
@@ -76,14 +76,27 @@ export function Cuenta() {
     onListo: refrescar,
   });
 
+  const esProveedor = persona.tipo !== 'CLIENTE';
+  const seccion = esProveedor ? 'proveedores' : 'clientes';
+
   return (
     <div className="space-y-4">
       <div>
-        <Link to="/clientes" className="text-sm opacity-60">
-          ← Clientes
+        <Link to={`/${seccion}`} className="text-sm opacity-60">
+          ← {esProveedor ? 'Proveedores' : 'Clientes'}
         </Link>
-        <h1 className="text-xl font-bold">{persona.nombre}</h1>
-        {persona.telefono && <p className="text-sm opacity-60">{persona.telefono}</p>}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold">{persona.nombre}</h1>
+            {persona.telefono && <p className="text-sm opacity-60">{persona.telefono}</p>}
+          </div>
+          <Link
+            to={`/${seccion}/${persona.id}/reporte`}
+            className="shrink-0 text-sm underline opacity-70"
+          >
+            Reporte PDF
+          </Link>
+        </div>
       </div>
 
       <Tarjeta destacada titulo="Saldo">
@@ -113,7 +126,7 @@ export function Cuenta() {
         <div className="flex gap-2">
           {debeAlgo && (
             <Boton onClick={() => setAbriendoAbono(true)} className="flex-1">
-              Registrar abono
+              {esProveedor ? 'Registrar pago' : 'Registrar abono'}
             </Boton>
           )}
           {puede('charge:create') && (
@@ -122,7 +135,7 @@ export function Cuenta() {
               onClick={() => setAbriendoCargo(true)}
               className="flex-1"
             >
-              Prestar o cargar deuda
+              {esProveedor ? 'Cargar lo que le debes' : 'Prestar o cargar deuda'}
             </Boton>
           )}
         </div>
@@ -629,7 +642,10 @@ function FormularioAbono({
   );
   const [monto, setMonto] = useState(pago?.importe.monto ?? '');
   const [cajaId, setCajaId] = useState('');
+  const [dia, setDia] = useState(pago ? pago.fecha.slice(0, 10) : hoy());
   const [error, setError] = useState<string | null>(null);
+
+  const esProveedor = persona.tipo !== 'CLIENTE';
 
   const registrar = useMutation({
     mutationFn: () =>
@@ -642,6 +658,9 @@ function FormularioAbono({
           moneda,
           aplicaA,
           cajaId: cajaId || null,
+          // Se paga muchas veces al día siguiente de lo que se acordó, y ese
+          // día es el que tiene que salir en el reporte.
+          fecha: dia === hoy() ? undefined : comoInstante(dia),
         }),
       }),
     onSuccess: onListo,
@@ -660,6 +679,8 @@ function FormularioAbono({
             historial.
           </Aviso>
         )}
+        <CampoFecha valor={dia} onChange={setDia} etiqueta="¿Qué día se pagó?" />
+
         <Seleccion
           etiqueta="¿A qué deuda?"
           valor={aplicaA}
@@ -669,20 +690,20 @@ function FormularioAbono({
           }}
           opciones={deudas.map((m) => ({
             valor: m,
-            texto: `Deuda en ${m} — ${formatMoney(money(persona.saldos[m]!, m))}`,
+            texto: `${esProveedor ? 'Le debes' : 'Deuda'} en ${m} — ${formatMoney(money(persona.saldos[m]!, m))}`,
           }))}
         />
 
         <div className="grid grid-cols-2 gap-3">
           <CampoDinero
-            etiqueta="¿Cuánto abona?"
+            etiqueta={esProveedor ? '¿Cuánto le pagas?' : '¿Cuánto abona?'}
             valor={monto}
             onChange={setMonto}
             moneda={moneda}
             autoFocus
           />
           <Seleccion
-            etiqueta="¿En qué paga?"
+            etiqueta={esProveedor ? '¿En qué le pagas?' : '¿En qué paga?'}
             valor={moneda}
             onChange={setMoneda}
             opciones={MONEDAS.map((m) => ({ valor: m, texto: m }))}
@@ -699,7 +720,8 @@ function FormularioAbono({
         <SelectorCaja moneda={moneda} valor={cajaId} onChange={setCajaId} />
 
         <p className="text-xs opacity-60">
-          Debe {formatMoney(money(saldo, aplicaA))}. Si abona de más, el sobrante le queda a favor.
+          {esProveedor ? 'Le debes' : 'Debe'} {formatMoney(money(saldo, aplicaA))}. Si{' '}
+          {esProveedor ? 'pagas' : 'abona'} de más, el sobrante queda a favor.
         </p>
 
         {error && <Aviso tono="error">{error}</Aviso>}
@@ -713,7 +735,13 @@ function FormularioAbono({
             disabled={!monto || registrar.isPending}
             className="flex-1"
           >
-            {registrar.isPending ? 'Guardando…' : corrigiendo ? 'Guardar corrección' : 'Guardar abono'}
+            {registrar.isPending
+              ? 'Guardando…'
+              : corrigiendo
+                ? 'Guardar corrección'
+                : esProveedor
+                  ? 'Guardar pago'
+                  : 'Guardar abono'}
           </Boton>
         </div>
       </div>
@@ -723,7 +751,9 @@ function FormularioAbono({
   return corrigiendo ? (
     <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-800">{cuerpo}</div>
   ) : (
-    <Tarjeta titulo="Registrar abono">{cuerpo}</Tarjeta>
+    <Tarjeta titulo={esProveedor ? 'Registrar pago al proveedor' : 'Registrar abono'}>
+      {cuerpo}
+    </Tarjeta>
   );
 }
 
@@ -833,8 +863,12 @@ function FormularioCargo({
   onCancelar: () => void;
 }) {
   const corrigiendo = Boolean(cargo);
+  const esProveedor = persona.tipo !== 'CLIENTE';
 
-  const [tipo, setTipo] = useState<Cargo['tipo']>(cargo?.tipo ?? 'PRESTAMO');
+  // A un proveedor no se le presta: se le anota lo que ya se le debe.
+  const [tipo, setTipo] = useState<Cargo['tipo']>(
+    cargo?.tipo ?? (esProveedor ? 'DEUDA' : 'PRESTAMO'),
+  );
   const [concepto, setConcepto] = useState(cargo?.concepto ?? '');
   const [monto, setMonto] = useState(cargo?.importe.monto ?? '');
   const [moneda, setMoneda] = useState<Moneda>(cargo?.moneda ?? 'VES');
@@ -875,18 +909,31 @@ function FormularioCargo({
           etiqueta="¿Qué es?"
           valor={tipo}
           onChange={setTipo}
-          opciones={[
-            { valor: 'PRESTAMO', texto: 'Préstamo — le entregas plata ahora' },
-            { valor: 'DEUDA', texto: 'Deuda pendiente — ya la debía, solo la anotas' },
-            { valor: 'AJUSTE', texto: 'Ajuste — corregir un saldo mal registrado' },
-          ]}
+          opciones={
+            esProveedor
+              ? // A un proveedor no se le presta ni él presta por aquí: un cargo
+                // siempre saca plata de la caja, y plata que ENTRA no cabe en
+                // este documento. Mientras no exista esa dirección, no se
+                // ofrece una opción que movería la caja al revés.
+                [
+                  { valor: 'DEUDA' as const, texto: 'Le debo — lo que le quedaste debiendo' },
+                  { valor: 'AJUSTE' as const, texto: 'Ajuste — corregir un saldo mal registrado' },
+                ]
+              : [
+                  { valor: 'PRESTAMO' as const, texto: 'Préstamo — le entregas plata ahora' },
+                  { valor: 'DEUDA' as const, texto: 'Deuda pendiente — ya la debía, solo la anotas' },
+                  { valor: 'AJUSTE' as const, texto: 'Ajuste — corregir un saldo mal registrado' },
+                ]
+          }
         />
 
         <Campo
-          etiqueta="¿Por qué te queda debiendo?"
+          etiqueta={esProveedor ? '¿Por qué le debes?' : '¿Por qué te queda debiendo?'}
           valor={concepto}
           onChange={setConcepto}
-          placeholder={tipo === 'PRESTAMO' ? 'Préstamo para el flete' : 'Deuda del cuaderno viejo'}
+          placeholder={
+            esProveedor ? 'Saldo del viaje del sábado' : 'Préstamo para el flete'
+          }
           autoFocus
         />
 
@@ -910,8 +957,9 @@ function FormularioCargo({
           </>
         ) : (
           <Aviso tono="info">
-            No mueve dinero: solo sube lo que {persona.nombre} te debe. Úsalo para pasar al sistema
-            una deuda que ya existía.
+            No mueve dinero: solo anota{' '}
+            {esProveedor ? `lo que le debes a ${persona.nombre}` : `lo que ${persona.nombre} te debe`}.
+            Úsalo para pasar al sistema una deuda que ya existía.
           </Aviso>
         )}
 
@@ -935,6 +983,8 @@ function FormularioCargo({
   return corrigiendo ? (
     <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-800">{cuerpo}</div>
   ) : (
-    <Tarjeta titulo="Prestar o cargar una deuda">{cuerpo}</Tarjeta>
+    <Tarjeta titulo={esProveedor ? 'Cargar lo que le debes' : 'Prestar o cargar una deuda'}>
+      {cuerpo}
+    </Tarjeta>
   );
 }
