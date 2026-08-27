@@ -191,10 +191,20 @@ export function ReporteCuenta({ tipo = 'CLIENTE' }: { tipo?: 'CLIENTE' | 'PROVEE
                 <tfoot>
                   <tr className="border-t-2 border-slate-800 dark:border-slate-300">
                     <td className="py-2 font-bold" colSpan={4}>
-                      {esCliente ? 'Debe hoy' : 'Le debes hoy'}
+                      {/* Negativo no es deuda: es plata adelantada. Llamarlo
+                          "debe −300" haría leer al revés toda la hoja. */}
+                      {D(persona.saldos?.[m] ?? '0').isNegative()
+                        ? esCliente
+                          ? 'Tiene a favor'
+                          : 'Tienes a favor (adelantado)'
+                        : esCliente
+                          ? 'Debe hoy'
+                          : 'Le debes hoy'}
                     </td>
                     <td className="tabular py-2 text-right text-base font-bold whitespace-nowrap">
-                      {formatMoney(money(persona.saldos?.[m] ?? '0', m))}
+                      {formatMoney(
+                        money(D(persona.saldos?.[m] ?? '0').abs().toString(), m),
+                      )}
                     </td>
                   </tr>
                 </tfoot>

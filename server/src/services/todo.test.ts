@@ -497,6 +497,53 @@ describe('El reporte de deudas', () => {
     expect((await CajaModel.findById(caja._id))!.saldo).toBe('700');
   });
 
+  /**
+   * Un adelanto: se le entrega plata a un proveedor sin deberle nada. El saldo
+   * se va a negativo, que en este sistema significa "a favor": la próxima
+   * compra se descuenta sola contra ese adelanto.
+   */
+  it('se le puede adelantar plata a un proveedor sin deberle nada', async () => {
+    await base();
+    const proveedor = await PersonaModel.create({ nombre: 'HIJINIO', tipo: 'PROVEEDOR' });
+    const caja = await CajaModel.create({ nombre: 'Dólares', moneda: 'USD', saldo: '1000' });
+
+    const pago = await registrarPago({
+      personaId: proveedor._id.toString(),
+      direccion: 'SALE',
+      monto: '300',
+      moneda: 'USD',
+      cajaId: caja._id.toString(),
+    });
+
+    expect(pago.asignaciones).toHaveLength(0);
+    expect(pago.aFavor).toBe('300');
+    expect((await PersonaModel.findById(proveedor._id))!.saldos.USD).toBe('-300');
+    expect((await CajaModel.findById(caja._id))!.saldo).toBe('700');
+  });
+
+  it('el adelanto se descuenta solo cuando llega el viaje', async () => {
+    const { papa } = await base();
+    const proveedor = await PersonaModel.create({ nombre: 'HIJINIO', tipo: 'PROVEEDOR' });
+
+    await registrarPago({
+      personaId: proveedor._id.toString(),
+      direccion: 'SALE',
+      monto: '300',
+      moneda: 'USD',
+    });
+
+    // Llega un viaje de 500 fiado: quedan debiendo 500, menos los 300 de antes.
+    await crearOperacion({
+      tipo: 'COMPRA',
+      personaId: proveedor._id.toString(),
+      moneda: 'USD',
+      items: [{ productoId: papa._id.toString(), cantidad: '10', precio: '50' }],
+      formaPago: 'FIADO',
+    });
+
+    expect((await PersonaModel.findById(proveedor._id))!.saldos.USD).toBe('200');
+  });
+
   it('se le puede pagar en una moneda distinta a la que se le debe', async () => {
     await base();
     const proveedor = await PersonaModel.create({ nombre: 'HIJINIO', tipo: 'PROVEEDOR' });

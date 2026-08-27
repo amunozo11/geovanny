@@ -124,11 +124,18 @@ export function Cuenta() {
 
       {!abriendoAbono && !abriendoCargo && (
         <div className="flex gap-2">
-          {debeAlgo && (
-            <Boton onClick={() => setAbriendoAbono(true)} className="flex-1">
-              {esProveedor ? 'Registrar pago' : 'Registrar abono'}
-            </Boton>
-          )}
+          {/* Sin deuda también se registra: a un proveedor se le adelanta plata
+              antes del viaje, y un cliente puede dejar algo a cuenta. Esconder
+              el botón obligaba a inventarse una deuda para poder anotarlo. */}
+          <Boton onClick={() => setAbriendoAbono(true)} className="flex-1">
+            {esProveedor
+              ? debeAlgo
+                ? 'Registrar pago'
+                : 'Adelantar plata'
+              : debeAlgo
+                ? 'Registrar abono'
+                : 'Recibir a cuenta'}
+          </Boton>
           {puede('charge:create') && (
             <Boton
               variante="secundario"
@@ -470,10 +477,14 @@ function FilaPago({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-            Abono {pago.numero} · {new Date(pago.fecha).toLocaleDateString('es-CO')}
+            {persona.tipo === 'CLIENTE' ? 'Abono' : 'Pago'} {pago.numero} ·{' '}
+            {new Date(pago.fecha).toLocaleDateString('es-CO')}
           </p>
           <p className="text-xs opacity-60">
             {pago.metodo.toLowerCase()}
+            {D(pago.aFavor).greaterThan(0) && (
+              <> · {formatMoney(money(pago.aFavor, pago.aplicaA))} quedaron a favor</>
+            )}
             {enOtraMoneda && (
               <>
                 {' · '}
@@ -634,7 +645,14 @@ function FormularioAbono({
   // Al corregir hay que poder elegir la deuda a la que ya se aplicó, aunque su
   // saldo esté hoy en cero: fue este mismo abono el que la bajó.
   const conSaldo = MONEDAS.filter((m) => D(persona.saldos?.[m] ?? '0').greaterThan(0));
-  const deudas = pago && !conSaldo.includes(pago.aplicaA) ? [pago.aplicaA, ...conSaldo] : conSaldo;
+  const conPago = pago && !conSaldo.includes(pago.aplicaA) ? [pago.aplicaA, ...conSaldo] : conSaldo;
+
+  /**
+   * Sin deuda no hay "a qué deuda", pero sí hay que elegir moneda: es un
+   * adelanto y hay que saber en qué queda a favor. Se ofrecen las tres.
+   */
+  const esAdelanto = conPago.length === 0;
+  const deudas = esAdelanto ? [...MONEDAS] : conPago;
 
   const [aplicaA, setAplicaA] = useState<Moneda>(pago?.aplicaA ?? deudas[0] ?? 'VES');
   const [moneda, setMoneda] = useState<Moneda>(
@@ -681,8 +699,16 @@ function FormularioAbono({
         )}
         <CampoFecha valor={dia} onChange={setDia} etiqueta="¿Qué día se pagó?" />
 
+        {esAdelanto && (
+          <Aviso tono="info">
+            {esProveedor
+              ? `No le debes nada a ${persona.nombre}. Esto queda como adelanto: se descuenta solo del próximo viaje.`
+              : `${persona.nombre} no debe nada. Esto queda a su favor y se descuenta solo de su próxima compra.`}
+          </Aviso>
+        )}
+
         <Seleccion
-          etiqueta="¿A qué deuda?"
+          etiqueta={esAdelanto ? '¿En qué moneda queda el adelanto?' : '¿A qué deuda?'}
           valor={aplicaA}
           onChange={(valor) => {
             setAplicaA(valor);
@@ -690,7 +716,9 @@ function FormularioAbono({
           }}
           opciones={deudas.map((m) => ({
             valor: m,
-            texto: `${esProveedor ? 'Le debes' : 'Deuda'} en ${m} — ${formatMoney(money(persona.saldos[m]!, m))}`,
+            texto: esAdelanto
+              ? m
+              : `${esProveedor ? 'Le debes' : 'Deuda'} en ${m} — ${formatMoney(money(persona.saldos[m] ?? '0', m))}`,
           }))}
         />
 
@@ -720,8 +748,14 @@ function FormularioAbono({
         <SelectorCaja moneda={moneda} valor={cajaId} onChange={setCajaId} />
 
         <p className="text-xs opacity-60">
-          {esProveedor ? 'Le debes' : 'Debe'} {formatMoney(money(saldo, aplicaA))}. Si{' '}
-          {esProveedor ? 'pagas' : 'abona'} de más, el sobrante queda a favor.
+          {esAdelanto ? (
+            <>Queda a favor en {aplicaA} hasta que haya algo que descontar.</>
+          ) : (
+            <>
+              {esProveedor ? 'Le debes' : 'Debe'} {formatMoney(money(saldo, aplicaA))}. Si{' '}
+              {esProveedor ? 'pagas' : 'abona'} de más, el sobrante queda a favor.
+            </>
+          )}
         </p>
 
         {error && <Aviso tono="error">{error}</Aviso>}
@@ -739,9 +773,11 @@ function FormularioAbono({
               ? 'Guardando…'
               : corrigiendo
                 ? 'Guardar corrección'
-                : esProveedor
-                  ? 'Guardar pago'
-                  : 'Guardar abono'}
+                : esAdelanto
+                  ? 'Guardar adelanto'
+                  : esProveedor
+                    ? 'Guardar pago'
+                    : 'Guardar abono'}
           </Boton>
         </div>
       </div>
@@ -751,7 +787,17 @@ function FormularioAbono({
   return corrigiendo ? (
     <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-800">{cuerpo}</div>
   ) : (
-    <Tarjeta titulo={esProveedor ? 'Registrar pago al proveedor' : 'Registrar abono'}>
+    <Tarjeta
+      titulo={
+        esAdelanto
+          ? esProveedor
+            ? 'Adelantar plata al proveedor'
+            : 'Recibir plata a cuenta'
+          : esProveedor
+            ? 'Registrar pago al proveedor'
+            : 'Registrar abono'
+      }
+    >
       {cuerpo}
     </Tarjeta>
   );
