@@ -703,7 +703,64 @@ describe('TODO: el día entero, moneda por moneda', () => {
     expect((await informeDelDia(diaDeHoy())).vieneDeAntes.sobrante.USD).toBe('100');
   });
 
-  it('descuenta gastos y préstamos entregados', async () => {
+  /**
+   * Prestarle a un cliente o cargarle una deuda NO baja el total del día: esa
+   * plata no se perdió, está en su cuenta esperando a que la pague. Solo los
+   * gastos restan.
+   */
+  it('lo prestado a un cliente no baja el total del día', async () => {
+    const { papa, cliente } = await base();
+
+    await venderTotal({
+      productoId: papa._id.toString(),
+      cantidad: '10',
+      precio: '10',
+      moneda: 'USD',
+    });
+    await gastar('15', 'USD', 'gasolina');
+    await registrarCargo({
+      personaId: cliente._id.toString(),
+      tipo: 'PRESTAMO',
+      concepto: 'Préstamo para el flete',
+      monto: '25',
+      moneda: 'USD',
+    });
+
+    const informe = await informeDelDia(diaDeHoy());
+
+    // Se ve aparte, con su nombre…
+    expect(informe.salidas.prestado.USD).toBe('25');
+    expect(informe.salidas.prestamos).toHaveLength(1);
+
+    // …pero solo el gasto resta: 100 − 15.
+    expect(informe.salidas.total.USD).toBe('15');
+    expect(informe.deberiaQuedar.USD).toBe('85');
+  });
+
+  it('el préstamo tampoco baja el saldo que se arrastra', async () => {
+    const { papa, cliente } = await base();
+    const ayer = new Date(Date.now() - 24 * 3_600_000);
+
+    await venderTotal({
+      productoId: papa._id.toString(),
+      cantidad: '10',
+      precio: '10',
+      moneda: 'USD',
+      fecha: ayer.toISOString(),
+    });
+    await registrarCargo({
+      personaId: cliente._id.toString(),
+      tipo: 'PRESTAMO',
+      concepto: 'Préstamo',
+      monto: '25',
+      moneda: 'USD',
+      fecha: ayer.toISOString(),
+    });
+
+    expect((await informeDelDia(diaDeHoy())).vieneDeAntes.sobrante.USD).toBe('100');
+  });
+
+  it('solo los gastos restan del día', async () => {
     const { papa, cliente } = await base();
 
     await venderTotal({
@@ -725,10 +782,11 @@ describe('TODO: el día entero, moneda por moneda', () => {
 
     expect(informe.entradas.recogido.USD).toBe('100');
     expect(informe.salidas.gastado.USD).toBe('15');
+    // El préstamo se informa, pero no resta del día.
     expect(informe.salidas.prestado.USD).toBe('25');
-    expect(informe.salidas.total.USD).toBe('40');
-    expect(informe.queda.USD).toBe('60');
-    expect(informe.deberiaQuedar.USD).toBe('60');
+    expect(informe.salidas.total.USD).toBe('15');
+    expect(informe.queda.USD).toBe('85');
+    expect(informe.deberiaQuedar.USD).toBe('85');
   });
 
   it('suma los abonos de clientes a lo recogido', async () => {

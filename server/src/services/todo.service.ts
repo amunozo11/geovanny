@@ -108,22 +108,21 @@ async function loQueViene(dia: string) {
 async function loQueSeMovio(desde: Date, hasta: Date): Promise<Record<Moneda, string>> {
   const rango = { $gte: desde, $lt: hasta };
 
-  const [ventas, cobros, gastos, prestamos] = await Promise.all([
+  const [ventas, cobros, gastos] = await Promise.all([
     OperacionModel.find({ tipo: 'VENTA', estado: 'ACTIVA', fecha: rango }, { moneda: 1, pagadoInicial: 1 }),
     PagoModel.find({ direccion: 'ENTRA', estado: 'ACTIVO', fecha: rango }, { importe: 1 }),
     GastoModel.find({ estado: 'ACTIVO', fecha: rango }, { importe: 1 }),
-    CargoModel.find({ estado: 'ACTIVO', salioDeCaja: true, fecha: rango }, { moneda: 1, importe: 1 }),
   ]);
 
   const entra = enCero();
   for (const v of ventas) sumarEn(entra, v.moneda, v.pagadoInicial);
   for (const p of cobros) sumarEn(entra, p.importe.moneda, p.importe.monto);
 
-  // Los pagos a proveedores quedan fuera, igual que en el día: si se restaran
-  // aquí, el saldo arrastrado no cuadraría con el que enseña la pantalla.
+  // Los pagos a proveedores y los préstamos quedan fuera, igual que en el día:
+  // si se restaran aquí, el saldo arrastrado no cuadraría con el que enseñó la
+  // pantalla el día anterior.
   const sale = enCero();
   for (const g of gastos) sumarEn(sale, g.importe.moneda, g.importe.monto);
-  for (const c of prestamos) sumarEn(sale, c.moneda, c.importe.monto);
 
   return restar(entra, sale);
 }
@@ -247,15 +246,18 @@ export async function informeDelDia(dia: string) {
 
   const recogido = sumar(contado, cobrado);
   /**
-   * Lo que sale de la cuenta del día. **Los pagos a proveedores NO entran.**
+   * Lo que sale de la cuenta del día: **solo los gastos**.
    *
-   * Es una decisión del negocio, no un descuido: lo que se le paga a un
-   * proveedor no es parte de lo que se hizo vendiendo, y meterlo aquí tapaba el
-   * número que esta pantalla existe para responder. Se siguen registrando, se
-   * siguen viendo aparte, y siguen saliendo de su caja — pero no se restan de
-   * este total.
+   * Ni lo pagado a proveedores ni los préstamos entran aquí. Es una decisión del
+   * negocio, no un descuido: esta pantalla responde a "cuánto produjo el día", y
+   * ni pagarle a un proveedor ni prestarle a un cliente son parte de eso — son
+   * plata que cambia de sitio por otros motivos. Meterlos tapaba el número que
+   * el informe existe para dar.
+   *
+   * Los dos se siguen registrando, se siguen viendo aparte y siguen saliendo de
+   * su caja. Lo único que cambia es que no se restan de este total.
    */
-  const salidas = sumar(gastado, prestado);
+  const salidas = sumar(gastado);
   const queda = restar(recogido, salidas);
   const deberiaQuedar = sumar(vieneDeAntes.sobrante, queda);
 
@@ -296,8 +298,9 @@ export async function informeDelDia(dia: string) {
 
     salidas: {
       gastado,
-      /** Se informa, pero **no** se resta del total (ver `salidas.total`). */
+      /** Se informan, pero **no** se restan del total (ver `salidas.total`). */
       aProveedores,
+      /** Tampoco se resta: prestar no es un gasto del día. */
       prestado,
       total: salidas,
       /** Los gastos uno por uno: es la lista que se va escribiendo aquí mismo. */

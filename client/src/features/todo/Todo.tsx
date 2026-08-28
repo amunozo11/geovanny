@@ -6,6 +6,8 @@ import {
   MONEDAS,
   cantidadTexto,
   conUnidad,
+  convert,
+  cotizaciones,
   formatMoney,
   formatRate,
   money,
@@ -207,27 +209,9 @@ export function Todo() {
 
         {puede('expense:write') && <NuevoGasto dia={dia} onListo={refrescar} />}
 
-        {informe.salidas.prestamos.length > 0 && (
-          <div className="mt-3 space-y-1 border-t border-slate-200 pt-3 text-xs dark:border-slate-800">
-            {informe.salidas.prestamos.map((prestamo) => (
-              <p key={prestamo.id} className="flex justify-between gap-2 opacity-70">
-                <span className="truncate">
-                  Préstamo a {prestamo.persona} · {prestamo.concepto}
-                </span>
-                <span className="tabular shrink-0">
-                  − {formatMoney(money(prestamo.monto, prestamo.moneda))}
-                </span>
-              </p>
-            ))}
-            <p className="pt-1 opacity-50">
-              Salió por otra pantalla, pero también sacó plata del cajón.
-            </p>
-          </div>
-        )}
-
         <div className="mt-2 border-t border-slate-200 pt-2 dark:border-slate-800">
           <Fila
-            texto="Total que salió"
+            texto="Total gastado"
             bolsa={informe.salidas.total}
             monedas={monedas}
             signo="−"
@@ -240,6 +224,33 @@ export function Todo() {
           cuenta del día: lo que se le paga a un proveedor no es parte de lo que
           se hizo vendiendo, y meterlo aquí tapaba el número que esta pantalla
           existe para responder. */}
+      {informe.salidas.prestamos.length > 0 && (
+        <Tarjeta titulo="Prestado y cargado a clientes">
+          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+            {informe.salidas.prestamos.map((prestamo) => (
+              <li key={prestamo.id} className="flex items-baseline justify-between gap-3 py-2">
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium">{prestamo.persona}</span>
+                  <span className="block truncate text-xs opacity-50">
+                    {prestamo.concepto} · {prestamo.numero} · {prestamo.hora}
+                  </span>
+                </span>
+                <span className="tabular shrink-0 text-sm font-semibold">
+                  {formatMoney(money(prestamo.monto, prestamo.moneda))}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 border-t border-slate-200 pt-2 dark:border-slate-800">
+            <Fila texto="Total prestado" bolsa={informe.salidas.prestado} monedas={monedas} fuerte />
+          </div>
+          <p className="mt-2 text-xs opacity-60">
+            <strong>No entra en la cuenta de abajo.</strong> Prestar no es un gasto del día: esa
+            plata no se perdió, está en la cuenta del cliente esperando a que la pague.
+          </p>
+        </Tarjeta>
+      )}
+
       {informe.salidas.pagos.length > 0 && (
         <Tarjeta titulo="Pagado a proveedores">
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -269,23 +280,7 @@ export function Todo() {
       )}
 
       {/* ── La cuenta final ────────────────────────────────────────────── */}
-      <Tarjeta destacada>
-        <p className="mb-2 text-xs tracking-wide uppercase opacity-60">Debería quedar</p>
-        <div className="space-y-2">
-          {monedas.map((m) => (
-            <div key={m} className="flex items-baseline justify-between gap-3">
-              <span className="text-sm opacity-70">{NOMBRE[m]}</span>
-              <span className="tabular text-2xl font-bold">
-                {formatMoney(money(informe.deberiaQuedar[m], m))}
-              </span>
-            </div>
-          ))}
-        </div>
-        <p className="mt-3 border-t border-white/15 pt-2 text-xs opacity-60">
-          Lo que traías, más lo que recogiste, menos los gastos. Sin contar lo pagado a
-          proveedores, que va aparte.
-        </p>
-      </Tarjeta>
+      <TotalDelDia informe={informe} monedas={monedas} />
 
       {(informe.movimientos.ventas.length > 0 || informe.movimientos.abonos.length > 0) && (
         <Tarjeta titulo="Todo lo del día, con nombre">
@@ -372,6 +367,86 @@ export function Todo() {
 
       <FormularioCierre informe={informe} monedas={monedas} onListo={refrescar} />
     </div>
+  );
+}
+
+/**
+ * El total del día, y la opción de verlo todo junto en una sola moneda.
+ *
+ * Por defecto va **separado por moneda**, que es como se cuenta el cajón: los
+ * dólares y los bolívares están en bolsillos distintos. Pero para saber "cuánto
+ * hice hoy" hace falta un solo número, y ahí sí toca convertir — con la tasa del
+ * día, la misma que quedó clavada al cerrarlo, así que el resultado no se mueve
+ * mañana.
+ */
+function TotalDelDia({ informe, monedas }: { informe: InformeTodo; monedas: Moneda[] }) {
+  const [enUna, setEnUna] = useState<Moneda | null>(null);
+
+  const juntado = (() => {
+    if (!enUna || !informe.tasa) return null;
+    const quotes = cotizaciones(informe.tasa);
+    return MONEDAS.reduce(
+      (acc, m) => acc.plus(D(convert(money(informe.deberiaQuedar[m], m), enUna, quotes).amount)),
+      D(0),
+    ).toString();
+  })();
+
+  return (
+    <Tarjeta destacada>
+      <p className="mb-2 text-xs tracking-wide uppercase opacity-60">Total del día</p>
+
+      {juntado !== null ? (
+        <p className="tabular text-3xl font-bold">{formatMoney(money(juntado, enUna!))}</p>
+      ) : (
+        <div className="space-y-2">
+          {monedas.map((m) => (
+            <div key={m} className="flex items-baseline justify-between gap-3">
+              <span className="text-sm opacity-70">{NOMBRE[m]}</span>
+              <span className="tabular text-2xl font-bold">
+                {formatMoney(money(informe.deberiaQuedar[m], m))}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {informe.tasa && (
+        <div className="mt-3 flex items-center gap-2">
+          <span className="text-xs opacity-60">Ver todo en</span>
+          {MONEDAS.map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setEnUna((previo) => (previo === m ? null : m))}
+              aria-pressed={enUna === m}
+              className={[
+                'min-h-[32px] rounded-md px-2.5 text-xs font-semibold transition',
+                enUna === m ? 'bg-white text-slate-900' : 'bg-white/15 hover:bg-white/25',
+              ].join(' ')}
+            >
+              {m}
+            </button>
+          ))}
+          {enUna && (
+            <button
+              type="button"
+              onClick={() => setEnUna(null)}
+              className="text-xs underline opacity-60"
+            >
+              separado
+            </button>
+          )}
+        </div>
+      )}
+
+      <p className="mt-3 border-t border-white/15 pt-2 text-xs opacity-60">
+        Lo que traías, más lo que recogiste, menos los gastos. No entra lo pagado a proveedores ni
+        lo prestado: eso va aparte.
+        {enUna && informe.tasa && (
+          <> Convertido con la tasa del día{informe.tasaFijada ? ', ya fijada' : ''}.</>
+        )}
+      </p>
+    </Tarjeta>
   );
 }
 

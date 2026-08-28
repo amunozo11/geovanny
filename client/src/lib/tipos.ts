@@ -1,4 +1,4 @@
-import type { Importe, Moneda } from '@geovanny/shared';
+import type { Importe, Moneda, TasaDelDia } from '@geovanny/shared';
 
 /** Formas que devuelve la API. Mongoose entrega `id` además de `_id`. */
 
@@ -212,7 +212,7 @@ export interface InformeTodo {
   dia: string;
   esHoy: boolean;
   /** La tasa con la que se lee este día. Si está fijada, ya no cambia. */
-  tasa: { usdCop: string; usdVes: string; mercado: string; fuente: string; at: string } | null;
+  tasa: TasaDelDia | null;
   tasaFijada: boolean;
   vieneDeAntes: {
     dia: string | null;

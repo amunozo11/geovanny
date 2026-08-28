@@ -304,11 +304,12 @@ se cuentan por separado. Cada cifra viene en la moneda en que se pactó o se pag
   contado sale de `pagadoInicial`, que no cambia, así que el cierre de un día
   pasado no se mueve cuando alguien abona una venta vieja.
 - `entradas` — `contado` + `cobrado` (abonos de clientes) = `recogido`.
-- `salidas` — `gastado` + `prestado`. **`aProveedores` viaja aparte y NO entra
-  en `total`**: lo que se le paga a un proveedor no es parte de lo que se hizo
-  vendiendo, y meterlo tapaba el número que el informe existe para responder. Se
-  informa con su lista para tenerlo a la vista, y sale de su caja igual, pero no
-  se resta del día ni del saldo que se arrastra al siguiente.
+- `salidas.total` — **solo `gastado`**. `aProveedores` y `prestado` viajan
+  aparte con sus listas, pero **no entran en el total** ni en el saldo que se
+  arrastra al día siguiente. Ni pagarle a un proveedor ni prestarle a un cliente
+  son parte de lo que produjo el día: son plata que cambia de sitio por otros
+  motivos, y meterlos tapaba el número que el informe existe para dar. Los dos
+  siguen saliendo de su caja igual.
 - `queda` = recogido − salidas · `deberiaQuedar` = `vieneDeAntes` + `queda`.
 - `cierre` — lo contado, la observación y la `diferencia` contra lo calculado.
 
