@@ -84,15 +84,25 @@ export function Deudas({ tipo = 'CLIENTE' }: { tipo?: 'CLIENTE' | 'PROVEEDOR' })
 
   const conDeuda = MONEDAS.filter((m) => enMoneda(m).length > 0);
 
-  // Un saldo negativo es plata a favor, no una deuda: no puede colarse entre lo
-  // que hay que cobrar, pero tampoco desaparecer sin más.
-  const aFavor = filas.flatMap((f) =>
-    MONEDAS.filter((m) => D(f.saldos[m] ?? '0').isNegative()).map((m) => ({
-      nombre: f.nombre,
-      moneda: m,
-      monto: D(f.saldos[m]!).abs().toString(),
-    })),
-  );
+  /**
+   * Los que tienen saldo a favor, por moneda.
+   *
+   * Un saldo negativo NO es una deuda: es plata ya adelantada. No puede colarse
+   * entre lo que hay que cobrar —sumaría al revés—, pero tampoco puede quedar en
+   * una nota al pie: si a un proveedor solo se le adelantó, esa es toda su
+   * información y la hoja se veía vacía.
+   */
+  const aFavorEn = (m: Moneda) =>
+    filas
+      .filter((f) => D(f.saldos[m] ?? '0').isNegative())
+      .map((f) => ({ ...f, monto: D(f.saldos[m]!).abs().toString() }))
+      .sort((a, b) => D(b.monto).comparedTo(D(a.monto)));
+
+  const conAFavor = MONEDAS.filter((m) => aFavorEn(m).length > 0);
+  const totalAFavor = (m: Moneda) =>
+    aFavorEn(m)
+      .reduce((acc, f) => acc.plus(D(f.monto)), D(0))
+      .toString();
 
   return (
     <div className="space-y-5">
@@ -120,7 +130,7 @@ export function Deudas({ tipo = 'CLIENTE' }: { tipo?: 'CLIENTE' | 'PROVEEDOR' })
             })}
           </p>
         </div>
-        {conDeuda.length > 0 && (
+        {(conDeuda.length > 0 || conAFavor.length > 0) && (
           // El botón se envuelve porque `Boton` no reenvía atributos sueltos:
           // sin esto, "Guardar PDF" saldría impreso dentro del propio PDF.
           <span data-noprint className="shrink-0">
@@ -131,7 +141,7 @@ export function Deudas({ tipo = 'CLIENTE' }: { tipo?: 'CLIENTE' | 'PROVEEDOR' })
         )}
       </header>
 
-      {conDeuda.length === 0 ? (
+      {conDeuda.length === 0 && conAFavor.length === 0 ? (
         <Vacio
           mensaje={esCliente ? 'Nadie te debe nada ahora mismo.' : 'No le debes nada a nadie.'}
         />
@@ -206,24 +216,63 @@ export function Deudas({ tipo = 'CLIENTE' }: { tipo?: 'CLIENTE' | 'PROVEEDOR' })
         })
       )}
 
-      {aFavor.length > 0 && (
-        <section className="break-inside-avoid border-t border-dashed border-slate-400 pt-3 dark:border-slate-600">
-          <h2 className="text-xs font-semibold tracking-wide uppercase opacity-60">
-            {esCliente ? 'Tienen saldo a favor' : 'Tienes saldo a favor'}
-          </h2>
-          <ul className="mt-2 space-y-1">
-            {aFavor.map((f) => (
-              <li key={`${f.nombre}-${f.moneda}`} className="flex justify-between gap-3 text-sm">
-                <span className="truncate">{f.nombre}</span>
-                <span className="tabular shrink-0">{formatMoney(money(f.monto, f.moneda))}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-1 text-xs opacity-50">
-            Pagaron de más. Se descuenta solo en su próxima compra.
-          </p>
-        </section>
-      )}
+      {conAFavor.map((m) => {
+        const lista = aFavorEn(m);
+        return (
+          <section key={`afavor-${m}`} className="break-inside-avoid">
+            <h2 className="mb-1 flex items-baseline justify-between gap-3 border-b border-slate-400 pb-1 dark:border-slate-600">
+              <span className="text-base font-bold tracking-wide uppercase">
+                A favor · {NOMBRE_MONEDA[m].replace('En ', '')}
+              </span>
+              <span className="text-xs font-normal opacity-60">
+                {lista.length} {lista.length === 1 ? 'cuenta' : 'cuentas'}
+              </span>
+            </h2>
+
+            <table className="w-full border-collapse text-left text-sm">
+              <thead>
+                <tr className="text-[10px] tracking-wide uppercase opacity-50">
+                  <th className="py-1 font-semibold">Nombre</th>
+                  <th className="py-1 text-right font-semibold">
+                    {esCliente ? 'Tiene a favor' : 'Adelantado'}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {lista.map((fila) => (
+                  <tr key={fila.id} className="border-b border-slate-200 dark:border-slate-800">
+                    <td className="py-1.5 pr-2">
+                      <span className="font-medium">{fila.nombre}</span>
+                      {fila.telefono && (
+                        <span className="block text-[11px] opacity-60">{fila.telefono}</span>
+                      )}
+                    </td>
+                    <td className="tabular py-1.5 text-right font-semibold whitespace-nowrap">
+                      {formatMoney(money(fila.monto, m))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-slate-800 dark:border-slate-300">
+                  <td className="py-2 font-bold">
+                    Total {esCliente ? 'a favor' : 'adelantado'}
+                  </td>
+                  <td className="tabular py-2 text-right text-base font-bold whitespace-nowrap">
+                    {formatMoney(money(totalAFavor(m), m))}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+
+            <p className="mt-1 text-xs opacity-60">
+              {esCliente
+                ? 'Pagaron de más. Se descuenta solo de su próxima compra.'
+                : 'Ya se lo pagaste por adelantado. Se descuenta solo del próximo viaje.'}
+            </p>
+          </section>
+        );
+      })}
 
       {conDeuda.length > 0 && (
         <p className="border-t border-slate-200 pt-2 text-xs opacity-50 dark:border-slate-800">

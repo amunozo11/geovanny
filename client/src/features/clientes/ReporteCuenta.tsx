@@ -61,6 +61,12 @@ const fechaCorta = (iso: string) =>
  * concretas, a veces convertida desde otra moneda. Cuando alguien viene a
  * reclamar, lo que se mira es justo eso.
  */
+function esAdelanto(pago: Pago): boolean {
+  // No se aplicó a ninguna factura ni a ningún cargo: no había deuda contra la
+  // cual descontarlo, así que es plata entregada por adelantado.
+  return (pago.asignaciones ?? []).length === 0 && (pago.asignacionesCargo ?? []).length === 0;
+}
+
 function detallesDelPago(pago: Pago, m: Moneda, esCliente: boolean): string[] {
   const lineas: string[] = [pago.metodo.toLowerCase()];
 
@@ -87,7 +93,13 @@ function detallesDelPago(pago: Pago, m: Moneda, esCliente: boolean): string[] {
   }
 
   if (D(pago.aFavor).greaterThan(0)) {
-    lineas.push(`${formatMoney(money(pago.aFavor, m))} quedaron a favor`);
+    lineas.push(
+      esAdelanto(pago)
+        ? `No había deuda: ${formatMoney(money(pago.aFavor, m))} quedaron ${
+            esCliente ? 'a su favor' : 'a tu favor'
+          }`
+        : `${formatMoney(money(pago.aFavor, m))} quedaron a favor`,
+    );
   }
 
   return lineas;
@@ -146,12 +158,15 @@ export function ReporteCuenta({ tipo = 'CLIENTE' }: { tipo?: 'CLIENTE' | 'PROVEE
         .map((p) => ({
           fecha: p.fecha,
           numero: p.numero,
-          concepto: esCliente ? 'Abono' : 'Pago',
+          concepto: esAdelanto(p) ? 'Adelanto' : esCliente ? 'Abono' : 'Pago',
           detalles: detallesDelPago(p, m, esCliente),
           cargo: '0',
           abono: p.montoAplicado,
         })),
     ].sort((a, b) => a.fecha.localeCompare(b.fecha));
+
+  /** Las monedas en las que hay plata adelantada, para destacarlo arriba. */
+  const aFavorEn = MONEDAS.filter((m) => D(persona.saldos?.[m] ?? '0').isNegative());
 
   const conMovimientos = MONEDAS.filter(
     (m) => movimientosDe(m).length > 0 || !D(persona.saldos?.[m] ?? '0').isZero(),
@@ -187,6 +202,26 @@ export function ReporteCuenta({ tipo = 'CLIENTE' }: { tipo?: 'CLIENTE' | 'PROVEE
           </Boton>
         </span>
       </header>
+
+      {aFavorEn.length > 0 && (
+        <section className="break-inside-avoid rounded-lg border-2 border-slate-800 px-4 py-3 dark:border-slate-300">
+          <h2 className="text-xs font-bold tracking-wide uppercase">
+            {esCliente ? 'Tiene a favor' : 'Le tienes adelantado'}
+          </h2>
+          <div className="mt-1 space-y-0.5">
+            {aFavorEn.map((m) => (
+              <p key={m} className="tabular text-xl font-bold">
+                {formatMoney(money(D(persona.saldos![m]!).abs().toString(), m))}
+              </p>
+            ))}
+          </div>
+          <p className="mt-1 text-xs opacity-60">
+            {esCliente
+              ? 'Pagó de más. Se descuenta solo de su próxima compra.'
+              : 'Ya se lo pagaste por adelantado. Se descuenta solo del próximo viaje.'}
+          </p>
+        </section>
+      )}
 
       {conMovimientos.length === 0 ? (
         <Vacio mensaje="Esta cuenta no tiene movimientos." />
