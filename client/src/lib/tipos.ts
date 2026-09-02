@@ -71,6 +71,10 @@ export interface Pago {
   aplicaA: Moneda;
   montoAplicado: string;
   metodo: string;
+  /** A qué ventas o compras se aplicó, y cuánto a cada una. */
+  asignaciones: { operacionId: string; numero: string; monto: string }[];
+  /** Lo mismo para las deudas sueltas: préstamos y cargos manuales. */
+  asignacionesCargo: { cargoId: string; numero: string; monto: string }[];
   aFavor: string;
   nota: string | null;
 }

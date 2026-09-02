@@ -1,6 +1,14 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { D, MONEDAS, formatMoney, money, type Moneda } from '@geovanny/shared';
+import {
+  D,
+  MONEDAS,
+  conUnidad,
+  formatMoney,
+  formatRate,
+  money,
+  type Moneda,
+} from '@geovanny/shared';
 import { api } from '../../lib/api';
 import { Aviso, Boton, Cargando, Vacio } from '../../components/ui/base';
 import type { Cargo, Operacion, Pago, Persona } from '../../lib/tipos';
@@ -28,7 +36,15 @@ interface Movimiento {
   fecha: string;
   numero: string;
   concepto: string;
-  detalle: string | null;
+  /**
+   * El porqué del movimiento, en varias líneas.
+   *
+   * En un abono es lo que de verdad se discute cuando alguien reclama: qué
+   * entregó, con qué tasa se convirtió si pagó en otra moneda, **a qué facturas
+   * se aplicó y cuánto a cada una**, y qué sobró. Sin eso, la línea solo dice
+   * que la deuda bajó, pero no por qué ni contra qué.
+   */
+  detalles: string[];
   /** Lo que sube la deuda. */
   cargo: string;
   /** Lo que la baja. */
@@ -37,6 +53,45 @@ interface Movimiento {
 
 const fechaCorta = (iso: string) =>
   new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: '2-digit' });
+
+/**
+ * Por qué bajó la deuda con este abono, y contra qué.
+ *
+ * Un abono no es solo "entraron 50": es plata que se repartió sobre facturas
+ * concretas, a veces convertida desde otra moneda. Cuando alguien viene a
+ * reclamar, lo que se mira es justo eso.
+ */
+function detallesDelPago(pago: Pago, m: Moneda, esCliente: boolean): string[] {
+  const lineas: string[] = [pago.metodo.toLowerCase()];
+
+  // Pagó en otra moneda: hay que poder explicar la conversión.
+  if (pago.importe.moneda !== m) {
+    lineas.push(
+      `${esCliente ? 'Entregó' : 'Le entregaste'} ${formatMoney(
+        money(pago.importe.monto, pago.importe.moneda),
+      )} → ${formatMoney(money(pago.montoAplicado, m))}`,
+    );
+    lineas.push(
+      m === 'VES'
+        ? formatRate('USD', 'VES', pago.importe.tasa.usdVes)
+        : formatRate('USD', 'COP', pago.importe.tasa.usdCop),
+    );
+  }
+
+  // A qué se aplicó, documento por documento.
+  for (const a of pago.asignaciones ?? []) {
+    lineas.push(`Bajó ${a.numero} en ${formatMoney(money(a.monto, m))}`);
+  }
+  for (const a of pago.asignacionesCargo ?? []) {
+    lineas.push(`Bajó ${a.numero} en ${formatMoney(money(a.monto, m))}`);
+  }
+
+  if (D(pago.aFavor).greaterThan(0)) {
+    lineas.push(`${formatMoney(money(pago.aFavor, m))} quedaron a favor`);
+  }
+
+  return lineas;
+}
 
 export function ReporteCuenta({ tipo = 'CLIENTE' }: { tipo?: 'CLIENTE' | 'PROVEEDOR' }) {
   const { id } = useParams<{ id: string }>();
@@ -64,7 +119,13 @@ export function ReporteCuenta({ tipo = 'CLIENTE' }: { tipo?: 'CLIENTE' | 'PROVEE
           fecha: o.fecha,
           numero: o.numero,
           concepto: o.tipo === 'COMPRA' ? 'Viaje' : 'Venta',
-          detalle: o.items.map((i) => i.nombre.toLowerCase()).join(', ') || null,
+          // Qué se llevó y a cómo: el papel tiene que poder defenderse solo.
+          detalles: o.items.map(
+            (i) =>
+              `${conUnidad(i.cantidad, i.unidad)} de ${i.nombre.toLowerCase()} × ${formatMoney(
+                money(i.precio, m),
+              )}`,
+          ),
           cargo: o.total.monto,
           abono: o.pagadoInicial,
         })),
@@ -74,7 +135,7 @@ export function ReporteCuenta({ tipo = 'CLIENTE' }: { tipo?: 'CLIENTE' | 'PROVEE
           fecha: c.fecha,
           numero: c.numero,
           concepto: c.tipo === 'PRESTAMO' ? 'Préstamo' : 'Deuda',
-          detalle: c.concepto,
+          detalles: [c.concepto, ...(c.nota ? [c.nota] : [])],
           cargo: c.importe.monto,
           abono: '0',
         })),
@@ -86,10 +147,7 @@ export function ReporteCuenta({ tipo = 'CLIENTE' }: { tipo?: 'CLIENTE' | 'PROVEE
           fecha: p.fecha,
           numero: p.numero,
           concepto: esCliente ? 'Abono' : 'Pago',
-          detalle:
-            p.importe.moneda === m
-              ? p.metodo.toLowerCase()
-              : `pagó ${formatMoney(money(p.importe.monto, p.importe.moneda))}`,
+          detalles: detallesDelPago(p, m, esCliente),
           cargo: '0',
           abono: p.montoAplicado,
         })),
@@ -169,11 +227,11 @@ export function ReporteCuenta({ tipo = 'CLIENTE' }: { tipo?: 'CLIENTE' | 'PROVEE
                         <td className="py-1.5 pr-2">
                           <span className="text-xs font-medium">{mov.concepto}</span>
                           <span className="ml-1 text-[11px] opacity-40">{mov.numero}</span>
-                          {mov.detalle && (
-                            <span className="block truncate text-[11px] opacity-60">
-                              {mov.detalle}
+                          {mov.detalles.map((linea, i) => (
+                            <span key={i} className="block text-[11px] opacity-60">
+                              {linea}
                             </span>
-                          )}
+                          ))}
                         </td>
                         <td className="tabular py-1.5 pr-2 text-right text-xs whitespace-nowrap">
                           {D(mov.cargo).isZero() ? '' : formatMoney(money(mov.cargo, m))}
