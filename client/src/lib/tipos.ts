@@ -11,6 +11,8 @@ export interface Persona {
   notas: string | null;
   saldos: Record<string, string>;
   activo: boolean;
+  /** Tasa pactada con esta persona; si es nula rige la general. */
+  tasaPropia?: { usdCop: string; usdVes: string } | null;
 }
 
 export interface Producto {

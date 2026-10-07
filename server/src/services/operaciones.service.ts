@@ -14,7 +14,7 @@ import { PersonaModel } from '../models/persona.js';
 import { MovimientoModel } from '../models/movimiento.js';
 import { siguienteNumero } from '../models/contador.js';
 import { BusinessRuleError, NotFoundError } from '../lib/errors.js';
-import { tasaVigente } from './tasas.service.js';
+import { tasaPara } from './tasas.service.js';
 import { registrarMovimiento } from './cajas.service.js';
 
 export interface ItemEntrada {
@@ -62,7 +62,6 @@ export async function crearOperacion(entrada: CrearOperacion) {
     throw new BusinessRuleError('SIN_ITEMS', 'Agrega al menos un producto.');
   }
 
-  const tasa: TasaDelDia = entrada.tasaOriginal ?? (await tasaVigente());
   const esVenta = entrada.tipo === 'VENTA';
   const canal: Canal = entrada.canal ?? 'CLIENTE';
   const esDirecta = canal === 'DIRECTA';
@@ -85,6 +84,9 @@ export async function crearOperacion(entrada: CrearOperacion) {
 
   const persona = esDirecta ? null : await PersonaModel.findById(entrada.personaId);
   if (!esDirecta && !persona) throw new NotFoundError('No se encontró el cliente o proveedor.');
+
+  // Al corregir se conserva la tasa congelada; si no, la del cliente o la general.
+  const tasa: TasaDelDia = entrada.tasaOriginal ?? (await tasaPara(persona));
 
   const nombreEnLaVenta = persona
     ? persona.nombre

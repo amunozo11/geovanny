@@ -6,7 +6,7 @@ import { CargoModel } from '../models/cargo.js';
 import { PersonaModel } from '../models/persona.js';
 import { siguienteNumero } from '../models/contador.js';
 import { BusinessRuleError, NotFoundError } from '../lib/errors.js';
-import { tasaVigente } from './tasas.service.js';
+import { tasaPara } from './tasas.service.js';
 import { registrarMovimiento } from './cajas.service.js';
 
 export interface RegistrarPago {
@@ -48,7 +48,7 @@ export async function registrarPago(entrada: RegistrarPago) {
   const persona = await PersonaModel.findById(entrada.personaId);
   if (!persona) throw new NotFoundError('No se encontró la persona.');
 
-  const vigente = entrada.tasaOriginal ?? (await tasaVigente());
+  const vigente = entrada.tasaOriginal ?? (await tasaPara(persona));
   const tasa: TasaDelDia = entrada.tasaAcordada
     ? {
         usdCop: entrada.tasaAcordada.usdCop,

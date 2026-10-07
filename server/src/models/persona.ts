@@ -23,10 +23,22 @@ export interface Persona {
   /** Deuda por moneda. Positivo = debe; negativo = tiene saldo a favor. */
   saldos: Record<string, string>;
   activo: boolean;
+  /**
+   * Tasa pactada con esta persona. Si existe, manda sobre la tasa general en
+   * todo lo que se le registre de aquí en adelante; si es nula, se usa la del
+   * día. No cambia nada ya registrado: cada documento guarda la suya.
+   */
+  tasaPropia: { usdCop: string; usdVes: string } | null;
 }
+
+const tasaPropiaSchema = new Schema(
+  { usdCop: { type: String, required: true }, usdVes: { type: String, required: true } },
+  { _id: false },
+);
 
 const personaSchema = new Schema<Persona>(
   {
+    tasaPropia: { type: tasaPropiaSchema, default: null },
     nombre: { type: String, required: true, trim: true },
     tipo: { type: String, enum: TIPOS_PERSONA, required: true },
     telefono: { type: String, default: null },

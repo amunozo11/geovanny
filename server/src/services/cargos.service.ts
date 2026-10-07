@@ -4,7 +4,7 @@ import { CargoModel, type TipoCargo } from '../models/cargo.js';
 import { PersonaModel } from '../models/persona.js';
 import { siguienteNumero } from '../models/contador.js';
 import { BusinessRuleError, NotFoundError } from '../lib/errors.js';
-import { tasaVigente } from './tasas.service.js';
+import { tasaPara } from './tasas.service.js';
 import { registrarMovimiento } from './cajas.service.js';
 
 export interface RegistrarCargo {
@@ -44,7 +44,7 @@ export async function registrarCargo(entrada: RegistrarCargo) {
   const persona = await PersonaModel.findById(entrada.personaId);
   if (!persona) throw new NotFoundError('No se encontró la persona.');
 
-  const tasa = entrada.tasaOriginal ?? (await tasaVigente());
+  const tasa = entrada.tasaOriginal ?? (await tasaPara(persona));
   const importe = crearImporte(monto.toString(), entrada.moneda, tasa);
   // Prestar es entregar plata; anotar una deuda vieja, no. El usuario lo dice,
   // porque solo él sabe si el billete salió del cajón.

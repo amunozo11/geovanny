@@ -48,6 +48,26 @@ export async function tasaVigente(): Promise<TasaDelDia> {
   return tasa;
 }
 
+/**
+ * La tasa que corresponde a una persona: la suya si tiene una pactada, y si no,
+ * la general. Una venta sin cliente (`null`) siempre usa la general.
+ */
+export async function tasaPara(
+  persona: { tasaPropia?: { usdCop: string; usdVes: string } | null } | null,
+): Promise<TasaDelDia> {
+  const propia = persona?.tasaPropia;
+  if (propia?.usdCop && propia.usdVes) {
+    return {
+      usdCop: propia.usdCop,
+      usdVes: propia.usdVes,
+      mercado: 'ACORDADA',
+      fuente: 'MANUAL',
+      at: new Date().toISOString(),
+    };
+  }
+  return tasaVigente();
+}
+
 export async function hayTasa(): Promise<boolean> {
   return (await TasaModel.estimatedDocumentCount()) > 0;
 }

@@ -21,6 +21,16 @@ const personaSchema = z.object({
   tipo: z.enum(TIPOS_PERSONA),
   telefono: z.string().max(40).nullish(),
   notas: z.string().max(300).nullish(),
+  /** Tasa pactada con esta persona; `null` la quita y vuelve a regir la general. */
+  tasaPropia: z
+    .object({
+      usdCop: z.string().regex(/^\d+(\.\d+)?$/, 'Escribe un número, por ejemplo 3099.31'),
+      usdVes: z.string().regex(/^\d+(\.\d+)?$/, 'Escribe un número, por ejemplo 906.81'),
+    })
+    .refine((t) => D(t.usdCop).greaterThan(0) && D(t.usdVes).greaterThan(0), {
+      message: 'La tasa debe ser mayor que cero.',
+    })
+    .nullish(),
 });
 
 personasRouter.get('/', async (req, res) => {

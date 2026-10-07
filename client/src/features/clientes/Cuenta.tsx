@@ -122,6 +122,8 @@ export function Cuenta() {
         </p>
       </Tarjeta>
 
+      <TasaDelCliente persona={persona} onCambio={refrescar} />
+
       {!abriendoAbono && !abriendoCargo && (
         <div className="flex gap-2">
           {/* Sin deuda también se registra: a un proveedor se le adelanta plata
@@ -206,6 +208,89 @@ export function Cuenta() {
         )}
       </Tarjeta>
     </div>
+  );
+}
+
+/**
+ * Tasa propia de esta persona.
+ *
+ * Por defecto todo usa la tasa general ("Tasa del día"). Si con este cliente se
+ * pactó otra, se pone aquí y rige para lo que se le registre de ahora en
+ * adelante. Lo ya registrado no cambia: cada venta guarda su tasa.
+ */
+function TasaDelCliente({ persona, onCambio }: { persona: Persona; onCambio: () => void }) {
+  const propia = persona.tasaPropia ?? null;
+  const [editando, setEditando] = useState(false);
+  const [usdCop, setUsdCop] = useState(propia?.usdCop ?? '');
+  const [usdVes, setUsdVes] = useState(propia?.usdVes ?? '');
+  const [error, setError] = useState<string | null>(null);
+
+  const guardar = useMutation({
+    mutationFn: (tasaPropia: { usdCop: string; usdVes: string } | null) =>
+      api(`/personas/${persona.id}`, { method: 'PATCH', body: JSON.stringify({ tasaPropia }) }),
+    onSuccess: () => {
+      setEditando(false);
+      setError(null);
+      onCambio();
+    },
+    onError: (e: ApiError) => setError(e.message),
+  });
+
+  return (
+    <Tarjeta titulo="Tasa de cambio">
+      {!editando ? (
+        <div className="space-y-2">
+          {propia ? (
+            <>
+              <p className="tabular text-sm">1 USD = {propia.usdCop} COP</p>
+              <p className="tabular text-sm">1 USD = {propia.usdVes} Bs</p>
+              <p className="text-xs opacity-60">Tasa propia de {persona.nombre}.</p>
+            </>
+          ) : (
+            <p className="text-sm opacity-70">Usa la tasa general del día.</p>
+          )}
+          <div className="flex gap-3 text-xs">
+            <button type="button" className="underline" onClick={() => setEditando(true)}>
+              {propia ? 'Cambiar' : 'Ponerle una tasa propia'}
+            </button>
+            {propia && (
+              <button
+                type="button"
+                className="underline opacity-70"
+                disabled={guardar.isPending}
+                onClick={() => guardar.mutate(null)}
+              >
+                Volver a la general
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <Campo etiqueta="1 dólar, ¿cuántos pesos?" valor={usdCop} onChange={setUsdCop} numerico />
+          <Campo
+            etiqueta="1 dólar, ¿cuántos bolívares?"
+            valor={usdVes}
+            onChange={setUsdVes}
+            numerico
+          />
+          {error && <Aviso tono="error">{error}</Aviso>}
+          <div className="flex gap-2">
+            <Boton variante="secundario" onClick={() => setEditando(false)} className="flex-1">
+              Cancelar
+            </Boton>
+            <Boton
+              onClick={() => guardar.mutate({ usdCop, usdVes })}
+              disabled={!usdCop || !usdVes || guardar.isPending}
+              className="flex-1"
+            >
+              Guardar
+            </Boton>
+          </div>
+        </div>
+      )}
+      {!editando && error && <Aviso tono="error">{error}</Aviso>}
+    </Tarjeta>
   );
 }
 
