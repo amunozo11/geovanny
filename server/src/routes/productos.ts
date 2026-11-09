@@ -5,6 +5,7 @@ import { ProductoModel } from '../models/producto.js';
 import { requireAuth, requirePermission } from '../middleware/auth.js';
 import { BusinessRuleError, NotFoundError } from '../lib/errors.js';
 import * as inventario from '../services/inventario.service.js';
+import { diaDeHoy } from '../lib/dias.js';
 
 export const productosRouter = Router();
 
@@ -98,6 +99,15 @@ productosRouter.post('/:id/ajuste', requirePermission('inventory:adjust'), async
     creadoPor: req.user!.id,
   });
   res.json({ data: producto });
+});
+
+/**
+ * Con cuánto se arrancó un día, qué se movió y cómo quedó.
+ * Responde "¿cuánto tenía ayer y con cuánto arranco hoy?".
+ */
+productosRouter.get('/existencias', async (req, res) => {
+  const dia = String(req.query.dia ?? '') || diaDeHoy();
+  res.json({ data: await inventario.existenciasDelDia(dia) });
 });
 
 productosRouter.get('/verificar-stock', requirePermission('inventory:adjust'), async (_req, res) => {

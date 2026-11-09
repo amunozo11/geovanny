@@ -185,7 +185,9 @@ export interface Cargo {
   _id: string;
   numero: string;
   personaNombre: string;
-  tipo: 'PRESTAMO' | 'DEUDA' | 'AJUSTE';
+  tipo: 'PRESTAMO' | 'DEUDA' | 'DEVOLUCION' | 'DESCUENTO' | 'AJUSTE';
+  /** `SUBE` o `BAJA`: hacia dónde movió la deuda. */
+  direccion: 'SUBE' | 'BAJA';
   concepto: string;
   importe: Importe;
   moneda: Moneda;
@@ -298,4 +300,28 @@ export interface InformeTodo {
   queda: PorMoneda;
   deberiaQuedar: PorMoneda;
   cierre: { observacion: string; sobrante: PorMoneda; diferencia: PorMoneda } | null;
+}
+
+/** Las existencias de un día: con cuánto se arrancó y cómo quedó. */
+export interface ExistenciasDelDia {
+  dia: string;
+  esHoy: boolean;
+  productos: {
+    id: string;
+    nombre: string;
+    unidad: string;
+    inicial: string;
+    entro: string;
+    salio: string;
+    final: string;
+    actual: string;
+    movimientos: {
+      id: string;
+      tipo: string;
+      cantidad: string;
+      motivo: string | null;
+      refNumero: string | null;
+      fecha: string;
+    }[];
+  }[];
 }

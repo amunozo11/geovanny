@@ -57,6 +57,9 @@ export function Inventario() {
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-bold">Inventario</h1>
         <div className="flex shrink-0 gap-3 text-sm">
+          <Link to="/inventario/existencias" className="underline opacity-70">
+            Por día
+          </Link>
           <Link to="/ventas-totales" className="underline opacity-70">
             Ventas totales
           </Link>

@@ -10,10 +10,16 @@ import { GastoModel } from '../models/gasto.js';
 import { limpiarCache, registrarTasa } from './tasas.service.js';
 import { crearOperacion } from './operaciones.service.js';
 import { registrar as venderTotal } from './ventasTotales.service.js';
-import { registrarCargo, anularCargo, corregirCargo } from './cargos.service.js';
+import {
+  registrarCargo,
+  anularCargo,
+  corregirCargo,
+  ajustarSaldo,
+} from './cargos.service.js';
 import { registrarPago, anularPago, corregirPago } from './pagos.service.js';
 import { guardarCierre, informeDelDia } from './todo.service.js';
 import { anularGasto, registrarGasto } from './gastos.service.js';
+import { ajustar, existenciasDelDia } from './inventario.service.js';
 import { siguienteNumero } from '../models/contador.js';
 import { crearImporte } from '@geovanny/shared';
 import { diaDeHoy } from '../lib/dias.js';
@@ -194,6 +200,173 @@ describe('Deudas que no vienen de una venta', () => {
 
       expect((await CargoModel.findById(cargo._id))!.saldo).toBe('100');
       expect((await PersonaModel.findById(cliente._id))!.saldos.USD).toBe('100');
+    });
+  });
+
+  describe('Corregir el saldo sin borrar nada', () => {
+    /**
+     * El caso del negocio: debe 1.500 y, por una devolución de mercancía, tiene
+     * que quedar en 1.000. Se dice el resultado, no la diferencia.
+     */
+    it('deja el saldo en el valor que se pide y deja el documento que lo explica', async () => {
+      const { cliente } = await base();
+      await registrarCargo({
+        personaId: cliente._id.toString(),
+        tipo: 'DEUDA',
+        concepto: 'Saldo viejo',
+        monto: '1500',
+        moneda: 'USD',
+      });
+
+      const ajuste = await ajustarSaldo({
+        personaId: cliente._id.toString(),
+        moneda: 'USD',
+        nuevoSaldo: '1000',
+        tipo: 'DEVOLUCION',
+        concepto: 'Devolvió 5 bultos',
+      });
+
+      expect(ajuste.direccion).toBe('BAJA');
+      expect(ajuste.importe.monto).toBe('500');
+      expect(ajuste.concepto).toBe('Devolvió 5 bultos');
+      expect((await PersonaModel.findById(cliente._id))!.saldos.USD).toBe('1000');
+
+      // Lo viejo sigue ahí: no se reescribió nada.
+      expect(await CargoModel.countDocuments({ estado: 'ACTIVO' })).toBe(2);
+    });
+
+    it('una devolución no mueve la caja: no entró plata', async () => {
+      const { cliente } = await base();
+      const caja = await CajaModel.create({ nombre: 'Dólares', moneda: 'USD', saldo: '900' });
+      await registrarCargo({
+        personaId: cliente._id.toString(),
+        tipo: 'DEUDA',
+        concepto: 'Saldo viejo',
+        monto: '1500',
+        moneda: 'USD',
+      });
+
+      await ajustarSaldo({
+        personaId: cliente._id.toString(),
+        moneda: 'USD',
+        nuevoSaldo: '1000',
+        tipo: 'DEVOLUCION',
+        concepto: 'Devolvió mercancía',
+      });
+
+      expect((await CajaModel.findById(caja._id))!.saldo).toBe('900');
+    });
+
+    it('saldar la deuda es dejarla en cero', async () => {
+      const { cliente } = await base();
+      await registrarCargo({
+        personaId: cliente._id.toString(),
+        tipo: 'DEUDA',
+        concepto: 'Saldo viejo',
+        monto: '800',
+        moneda: 'VES',
+      });
+
+      await ajustarSaldo({
+        personaId: cliente._id.toString(),
+        moneda: 'VES',
+        nuevoSaldo: '0',
+        tipo: 'DESCUENTO',
+        concepto: 'Se le perdonó',
+      });
+
+      expect((await PersonaModel.findById(cliente._id))!.saldos.VES).toBe('0');
+    });
+
+    it('también sirve para subirlo, si quedó corto', async () => {
+      const { cliente } = await base();
+      const ajuste = await ajustarSaldo({
+        personaId: cliente._id.toString(),
+        moneda: 'USD',
+        nuevoSaldo: '250',
+        concepto: 'Faltaba anotar el viaje del sábado',
+      });
+
+      expect(ajuste.direccion).toBe('SUBE');
+      expect((await PersonaModel.findById(cliente._id))!.saldos.USD).toBe('250');
+    });
+
+    it('un cargo que baja no se cobra con abonos', async () => {
+      const { cliente } = await base();
+      await registrarCargo({
+        personaId: cliente._id.toString(),
+        tipo: 'DEUDA',
+        concepto: 'Saldo viejo',
+        monto: '1000',
+        moneda: 'USD',
+      });
+      const devolucion = await ajustarSaldo({
+        personaId: cliente._id.toString(),
+        moneda: 'USD',
+        nuevoSaldo: '600',
+        tipo: 'DEVOLUCION',
+        concepto: 'Devolvió mercancía',
+      });
+
+      // Nace saldado: un abono no debe intentar descontarlo.
+      expect(devolucion.saldo).toBe('0');
+
+      const pago = await registrarPago({
+        personaId: cliente._id.toString(),
+        direccion: 'ENTRA',
+        monto: '600',
+        moneda: 'USD',
+      });
+
+      expect(pago.aFavor).toBe('0');
+      expect((await PersonaModel.findById(cliente._id))!.saldos.USD).toBe('0');
+    });
+
+    it('no deja usar una devolución para subir la deuda', async () => {
+      const { cliente } = await base();
+      await expect(
+        ajustarSaldo({
+          personaId: cliente._id.toString(),
+          moneda: 'USD',
+          nuevoSaldo: '500',
+          tipo: 'DEVOLUCION',
+          concepto: 'Mal puesto',
+        }),
+      ).rejects.toThrow(/para subir el saldo/i);
+    });
+
+    it('avisa si el saldo ya está en ese valor', async () => {
+      const { cliente } = await base();
+      await expect(
+        ajustarSaldo({
+          personaId: cliente._id.toString(),
+          moneda: 'USD',
+          nuevoSaldo: '0',
+          concepto: 'Nada que hacer',
+        }),
+      ).rejects.toThrow(/no hay nada que ajustar/i);
+    });
+
+    it('anular una devolución devuelve la deuda a como estaba', async () => {
+      const { cliente } = await base();
+      await registrarCargo({
+        personaId: cliente._id.toString(),
+        tipo: 'DEUDA',
+        concepto: 'Saldo viejo',
+        monto: '1500',
+        moneda: 'USD',
+      });
+      const devolucion = await ajustarSaldo({
+        personaId: cliente._id.toString(),
+        moneda: 'USD',
+        nuevoSaldo: '1000',
+        tipo: 'DEVOLUCION',
+        concepto: 'Devolvió mercancía',
+      });
+
+      await anularCargo(devolucion._id.toString(), 'No devolvió nada');
+
+      expect((await PersonaModel.findById(cliente._id))!.saldos.USD).toBe('1500');
     });
   });
 
@@ -576,6 +749,98 @@ describe('El reporte de deudas', () => {
     await PersonaModel.create({ nombre: 'AL DIA', tipo: 'CLIENTE' });
 
     expect((await reporte('CLIENTE')).map((p) => p.nombre)).toEqual([]);
+  });
+});
+
+describe('Las existencias de un día', () => {
+  beforeAll(async () => {
+    await startTestMongo();
+  }, 120_000);
+
+  afterAll(async () => {
+    await stopTestMongo();
+  });
+
+  beforeEach(async () => {
+    await clearTestMongo();
+    limpiarCache();
+  });
+
+  /**
+   * La pregunta que antes no se podía responder: con cuánto arranqué hoy, y con
+   * cuánto arranqué ayer. Se reconstruye sumando los movimientos anteriores al
+   * día, así que siempre cuadra con el libro aunque se corrija algo viejo.
+   */
+  it('dice con cuánto se arrancó, qué se movió y cómo quedó', async () => {
+    const { papa } = await base();
+    const ayer = new Date(Date.now() - 24 * 3_600_000);
+
+    // Ayer salieron 10 y hoy 4 más.
+    await venderTotal({
+      productoId: papa._id.toString(),
+      cantidad: '10',
+      precio: '10',
+      moneda: 'USD',
+      fecha: ayer.toISOString(),
+    });
+    await venderTotal({
+      productoId: papa._id.toString(),
+      cantidad: '4',
+      precio: '10',
+      moneda: 'USD',
+    });
+
+    const deAyer = (await existenciasDelDia(diaDeHoy(ayer))).productos[0]!;
+    expect(deAyer.inicial).toBe('100');
+    expect(deAyer.salio).toBe('10');
+    expect(deAyer.final).toBe('90');
+
+    const deHoy = (await existenciasDelDia(diaDeHoy())).productos[0]!;
+    // Con lo que cerró ayer arranca hoy: no hay huecos entre días.
+    expect(deHoy.inicial).toBe(deAyer.final);
+    expect(deHoy.salio).toBe('4');
+    expect(deHoy.final).toBe('86');
+    // Y lo calculado cuadra con lo que el inventario enseña ahora mismo.
+    expect(deHoy.final).toBe(deHoy.actual);
+  });
+
+  it('cuenta aparte lo que entró y lo que salió', async () => {
+    const { papa } = await base();
+
+    await ajustar({
+      productoId: papa._id.toString(),
+      cantidad: '20',
+      tipo: 'AJUSTE',
+      motivo: 'Entró mercancía',
+    });
+    await venderTotal({
+      productoId: papa._id.toString(),
+      cantidad: '5',
+      precio: '10',
+      moneda: 'USD',
+    });
+
+    const fila = (await existenciasDelDia(diaDeHoy())).productos[0]!;
+    expect(fila.inicial).toBe('100');
+    expect(fila.entro).toBe('20');
+    expect(fila.salio).toBe('5');
+    expect(fila.final).toBe('115');
+    expect(fila.movimientos).toHaveLength(2);
+  });
+
+  it('un conteo que corrige un error queda escrito con su motivo', async () => {
+    const { papa } = await base();
+    await ajustar({
+      productoId: papa._id.toString(),
+      nuevaCantidad: '87',
+      tipo: 'AJUSTE',
+      motivo: 'Conteo del sábado: faltaban 13',
+    });
+
+    const fila = (await existenciasDelDia(diaDeHoy())).productos[0]!;
+    expect(fila.inicial).toBe('100');
+    expect(fila.final).toBe('87');
+    expect(fila.movimientos[0]!.motivo).toMatch(/conteo del sábado/i);
   });
 });
 
@@ -1097,6 +1362,53 @@ describe('TODO: el día entero, moneda por moneda', () => {
       expect(informe.deberiaQuedar.USD).toBe('100');
       expect(informe.cierre!.sobrante.USD).toBe('95');
       expect(informe.cierre!.diferencia.USD).toBe('-5');
+    });
+
+    it('una moneda sin contar no se guarda como cero: queda lo calculado', async () => {
+      const { papa } = await base();
+      await venderTotal({
+        productoId: papa._id.toString(),
+        cantidad: '10',
+        precio: '10',
+        moneda: 'USD',
+      });
+
+      const informe = await guardarCierre({ dia: diaDeHoy(), sobrante: { VES: '500' } });
+
+      expect(informe.cierre!.sobrante.VES).toBe('500');
+      expect(informe.cierre!.sobrante.USD).toBe('100');
+      expect(informe.cierre!.diferencia.USD).toBe('0');
+    });
+
+    it('un cero escrito a propósito sí es cero', async () => {
+      const { papa } = await base();
+      await venderTotal({
+        productoId: papa._id.toString(),
+        cantidad: '10',
+        precio: '10',
+        moneda: 'USD',
+      });
+
+      const informe = await guardarCierre({ dia: diaDeHoy(), sobrante: { USD: '0' } });
+
+      expect(informe.cierre!.sobrante.USD).toBe('0');
+      expect(informe.cierre!.diferencia.USD).toBe('-100');
+    });
+
+    it('lo no contado de ayer sigue arrastrándose hoy', async () => {
+      const { papa } = await base();
+      const ayer = new Date(Date.now() - 24 * 3_600_000);
+      await venderTotal({
+        productoId: papa._id.toString(),
+        cantidad: '10',
+        precio: '10',
+        moneda: 'USD',
+        fecha: ayer.toISOString(),
+      });
+
+      await guardarCierre({ dia: diaDeHoy(ayer), sobrante: {} });
+
+      expect((await informeDelDia(diaDeHoy())).vieneDeAntes.sobrante.USD).toBe('100');
     });
 
     it('volver a cerrar el mismo día actualiza, no duplica', async () => {

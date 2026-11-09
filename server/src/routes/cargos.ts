@@ -21,6 +21,7 @@ cargosRouter.use(requireAuth);
 const crearSchema = z.object({
   personaId: z.string().min(1, 'Elige la persona'),
   tipo: z.enum(TIPOS_CARGO).default('DEUDA'),
+  direccion: z.enum(['SUBE', 'BAJA']).optional(),
   concepto: z.string().min(1, 'Escribe por qué te queda debiendo').max(120),
   monto: z.string().regex(/^\d+(\.\d+)?$/, 'Escribe un número'),
   moneda: z.enum(MONEDAS),
@@ -36,6 +37,27 @@ cargosRouter.get('/', async (req, res) => {
   if (req.query.pendientes === 'true') consulta.saldo = { $ne: '0' };
 
   res.json({ data: await CargoModel.find(consulta).sort({ fecha: -1 }).limit(200) });
+});
+
+/**
+ * Dejar el saldo en un valor concreto. Se dice el resultado, no la diferencia:
+ * "debe 1.500 y tiene que quedar en 1.000".
+ */
+cargosRouter.post('/ajustar-saldo', requirePermission('charge:create'), async (req, res) => {
+  const entrada = z
+    .object({
+      personaId: z.string().min(1, 'Elige la persona'),
+      moneda: z.enum(MONEDAS),
+      nuevoSaldo: z.string().regex(/^-?\d+(\.\d+)?$/, 'Escribe en cuánto debe quedar'),
+      tipo: z.enum(TIPOS_CARGO).optional(),
+      concepto: z.string().min(1, 'Escribe por qué se corrige').max(120),
+      fecha: z.string().datetime().nullish(),
+      nota: z.string().max(300).nullish(),
+    })
+    .parse(req.body);
+
+  const cargo = await cargos.ajustarSaldo({ ...entrada, creadoPor: req.user!.id });
+  res.status(201).json({ data: cargo });
 });
 
 cargosRouter.post('/', requirePermission('charge:create'), async (req, res) => {

@@ -67,6 +67,7 @@ deduce de ahí.
 | PATCH | `/:id` | **No** toca el stock (RC-10) |
 | DELETE | `/:id` | Lo borra si nunca se movió; si tiene historial, lo oculta |
 | POST | `/:id/ajuste` | `{cantidad \| nuevaCantidad, tipo, motivo}` — el motivo es obligatorio |
+| GET | `/existencias` | `?dia=` — con cuánto se arrancó, qué se movió y cómo quedó |
 | GET | `/:id/movimientos` | Historial de por qué el stock es el que es |
 | GET | `/verificar-stock` | Recalcula desde los movimientos y avisa si algo no cuadra |
 
@@ -84,6 +85,13 @@ mercancía salió gratis y la utilidad saldría inflada.
 `nuevaCantidad` es la alternativa a `cantidad` en el ajuste: se dice cuánto hay
 de verdad tras contar y el servidor calcula la diferencia. Evita la resta mental,
 que es donde se cometen los errores.
+
+`GET /existencias` responde "¿cuánto tenía ayer y con cuánto arranco hoy?". No
+hay foto diaria guardada: se reconstruye **desde el stock actual deshaciendo los
+movimientos posteriores** al día. Una foto se desincroniza en cuanto alguien
+corrige un movimiento viejo; así siempre cuadra con lo que el inventario enseña,
+que es contra lo que se va a comparar. Trae `inicial`, `entro`, `salio`, `final`
+y `actual` por producto, más los movimientos del día.
 
 Un `DELETE` sobre un producto sin movimientos y con stock cero lo borra de
 verdad y libera su nombre; si ya se vendió o se compró alguna vez, solo se
@@ -259,12 +267,29 @@ documentos: siempre se puede responder de dónde salió cada peso que alguien de
 | Método | Ruta | Qué hace |
 |---|---|---|
 | GET | `/` | `?personaId=&pendientes=true` |
-| POST | `/` | `{personaId, tipo, concepto, monto, moneda, salioDeCaja?, cajaId?, fecha?, nota?}` |
+| POST | `/` | `{personaId, tipo, direccion?, concepto, monto, moneda, salioDeCaja?, cajaId?, fecha?, nota?}` |
+| POST | `/ajustar-saldo` | `{personaId, moneda, nuevoSaldo, tipo?, concepto, fecha?}` — deja el saldo en ese valor |
 | PATCH | `/:id` | Corregir. Los mismos campos, todos opcionales, más `motivo` |
 | POST | `/:id/anular` | `{motivo}` — devuelve el saldo y la plata a la caja |
 
 `tipo`: `PRESTAMO` (sale plata de la caja) · `DEUDA` (ya se debía, no mueve
-dinero) · `AJUSTE` (corrige un saldo). `salioDeCaja` decide de verdad si se
+dinero) · `DEVOLUCION` (devolvió mercancía) · `DESCUENTO` (rebaja o deuda
+perdonada) · `AJUSTE` (corrige un saldo).
+
+Cada tipo lleva una **dirección**: `PRESTAMO` y `DEUDA` suben el saldo;
+`DEVOLUCION` y `DESCUENTO` lo bajan; `AJUSTE` va donde se le diga y es el único
+que necesita `direccion` explícita. Lo que **baja** nunca mueve la caja: una
+devolución no entrega dinero, y registrarla como si lo hiciera descuadraría el
+cierre del día. Un cargo `BAJA` nace con `saldo: '0'` para que los abonos no
+intenten saldarlo.
+
+`POST /ajustar-saldo` recibe **en cuánto tiene que quedar**, no la diferencia
+—"debe 1.500 y tiene que quedar en 1.000"—, igual que el conteo del inventario:
+evita la resta mental, que es donde se cometen los errores. El saldo no se
+escribe por encima; se crea el documento que falta para llegar a esa cifra, así
+que dentro de un mes todavía se puede responder por qué bajó y quién lo decidió.
+Rechaza un tipo que empuje al revés de lo pedido (`DIRECCION_CONTRARIA`) y avisa
+si ya está en ese valor (`SIN_DIFERENCIA`). `salioDeCaja` decide de verdad si se
 descuenta de la caja; por defecto es `true` solo para `PRESTAMO`, porque el
 sistema no puede adivinar si el billete salió del cajón.
 
@@ -330,6 +355,10 @@ mes.
 `POST /cierre` es idempotente por día (upsert) y **no valida** lo contado contra
 lo calculado a propósito: si contó 20 mil de menos, eso es un dato, no un error
 que haya que impedir. Se guarda tal cual y la diferencia queda a la vista.
+
+Una moneda que falta en `sobrante` (o viene en blanco) **no cuenta como cero**:
+se guarda lo calculado (`deberiaQuedar`) para esa moneda. Un `"0"` escrito sí es
+cero. Así un conteo olvidado no borra del arrastre lo que había en el cajón.
 
 ---
 

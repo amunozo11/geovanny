@@ -15,6 +15,7 @@ import { Deudas } from '../features/clientes/Deudas';
 import { Proveedores } from '../features/clientes/Proveedores';
 import { ReporteCuenta } from '../features/clientes/ReporteCuenta';
 import { Inventario } from '../features/inventario/Inventario';
+import { Existencias } from '../features/inventario/Existencias';
 import { Mas } from '../features/mas/Mas';
 import { Tasas } from '../features/mas/Tasas';
 import { Gastos } from '../features/mas/Gastos';
@@ -57,6 +58,7 @@ export function App() {
             <Route path="clientes/:id" element={<Cuenta />} />
             <Route path="proveedores/:id" element={<Cuenta />} />
             <Route path="inventario" element={<Inventario />} />
+            <Route path="inventario/existencias" element={<Existencias />} />
             <Route path="mas" element={<Mas />} />
             <Route path="mas/tasas" element={<Tasas />} />
             <Route path="mas/gastos" element={<Gastos />} />

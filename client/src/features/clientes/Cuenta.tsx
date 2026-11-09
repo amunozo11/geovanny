@@ -36,6 +36,7 @@ export function Cuenta() {
   const { puede } = useAuth();
   const [abriendoAbono, setAbriendoAbono] = useState(false);
   const [abriendoCargo, setAbriendoCargo] = useState(false);
+  const [corrigiendoSaldo, setCorrigiendoSaldo] = useState(false);
   /** Corregir o quitar un movimiento concreto. Solo uno abierto a la vez. */
   const [abierto, setAbierto] = useState<{ id: string; accion: Accion } | null>(null);
 
@@ -124,7 +125,7 @@ export function Cuenta() {
 
       <TasaDelCliente persona={persona} onCambio={refrescar} />
 
-      {!abriendoAbono && !abriendoCargo && (
+      {!abriendoAbono && !abriendoCargo && !corrigiendoSaldo && (
         <div className="flex gap-2">
           {/* Sin deuda también se registra: a un proveedor se le adelanta plata
               antes del viaje, y un cliente puede dejar algo a cuenta. Esconder
@@ -148,6 +149,29 @@ export function Cuenta() {
             </Boton>
           )}
         </div>
+      )}
+
+      {/* Corregir el saldo vive aparte y en tono discreto: es la salida de
+          emergencia, no el camino de todos los días. */}
+      {!abriendoAbono && !abriendoCargo && !corrigiendoSaldo && puede('charge:create') && (
+        <button
+          type="button"
+          onClick={() => setCorrigiendoSaldo(true)}
+          className="w-full text-center text-sm underline opacity-60"
+        >
+          Corregir el saldo
+        </button>
+      )}
+
+      {corrigiendoSaldo && (
+        <FormularioCorregirSaldo
+          persona={persona}
+          onListo={() => {
+            setCorrigiendoSaldo(false);
+            void clienteDeQuery.invalidateQueries();
+          }}
+          onCancelar={() => setCorrigiendoSaldo(false)}
+        />
       )}
 
       {abriendoAbono && (
@@ -891,6 +915,8 @@ function FormularioAbono({
 const ETIQUETA_CARGO: Record<Cargo['tipo'], string> = {
   PRESTAMO: 'Préstamo',
   DEUDA: 'Deuda',
+  DEVOLUCION: 'Devolución',
+  DESCUENTO: 'Descuento',
   AJUSTE: 'Ajuste',
 };
 
@@ -918,7 +944,9 @@ function FilaCargo({
     <li className="py-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+          <p
+            className={`text-sm font-medium ${cargo.direccion === 'BAJA' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}`}
+          >
             {ETIQUETA_CARGO[cargo.tipo]} {cargo.numero} ·{' '}
             {new Date(cargo.fecha).toLocaleDateString('es-CO')}
           </p>
@@ -928,8 +956,13 @@ function FilaCargo({
           </p>
         </div>
         <div className="shrink-0 text-right">
-          <p className="tabular">{formatMoney(money(cargo.importe.monto, cargo.moneda))}</p>
-          {pendiente ? (
+          <p className="tabular">
+            {cargo.direccion === 'BAJA' && <span className="opacity-60">− </span>}
+            {formatMoney(money(cargo.importe.monto, cargo.moneda))}
+          </p>
+          {cargo.direccion === 'BAJA' ? (
+            <p className="text-xs text-emerald-600 dark:text-emerald-400">bajó la deuda</p>
+          ) : pendiente ? (
             <p className="tabular text-xs text-amber-600 dark:text-amber-400">
               debe {formatMoney(money(cargo.saldo, cargo.moneda))}
             </p>
@@ -1116,6 +1149,162 @@ function FormularioCargo({
   ) : (
     <Tarjeta titulo={esProveedor ? 'Cargar lo que le debes' : 'Prestar o cargar una deuda'}>
       {cuerpo}
+    </Tarjeta>
+  );
+}
+
+/**
+ * Corregir el saldo dejándolo en el valor que tiene que quedar.
+ *
+ * Se escribe **el resultado, no la diferencia** —"debe 1.500 y tiene que quedar
+ * en 1.000"—, igual que el conteo del inventario. Es como se piensa de verdad y
+ * evita la resta mental, que es donde se cometen los errores.
+ *
+ * Nada se reescribe: el sistema crea el documento que falta para llegar a esa
+ * cifra, con su motivo y su fecha. Dentro de un mes todavía se podrá responder
+ * por qué bajó y quién lo decidió, que es justo lo que el cuaderno no permite.
+ */
+function FormularioCorregirSaldo({
+  persona,
+  onListo,
+  onCancelar,
+}: {
+  persona: Persona;
+  onListo: () => void;
+  onCancelar: () => void;
+}) {
+  const conSaldo = MONEDAS.filter((m) => !D(persona.saldos?.[m] ?? '0').isZero());
+
+  const [moneda, setMoneda] = useState<Moneda>(conSaldo[0] ?? 'VES');
+  const [nuevoSaldo, setNuevoSaldo] = useState('');
+  const [tipo, setTipo] = useState<Cargo['tipo']>('DEVOLUCION');
+  const [concepto, setConcepto] = useState('');
+  const [dia, setDia] = useState(hoy());
+  const [error, setError] = useState<string | null>(null);
+
+  const actual = D(persona.saldos?.[moneda] ?? '0');
+  const objetivo = nuevoSaldo === '' ? null : D(nuevoSaldo);
+  const diferencia = objetivo ? objetivo.minus(actual) : null;
+  const baja = diferencia?.isNegative() ?? false;
+
+  // Un tipo que empuje al revés de lo pedido sería mentira en el papel.
+  const tiposValidos: Cargo['tipo'][] = baja
+    ? ['DEVOLUCION', 'DESCUENTO', 'AJUSTE']
+    : ['DEUDA', 'AJUSTE'];
+  const tipoElegido = tiposValidos.includes(tipo) ? tipo : tiposValidos[0]!;
+
+  const guardar = useMutation({
+    mutationFn: () =>
+      api('/cargos/ajustar-saldo', {
+        method: 'POST',
+        body: JSON.stringify({
+          personaId: persona.id,
+          moneda,
+          nuevoSaldo,
+          tipo: tipoElegido,
+          concepto,
+          fecha: dia === hoy() ? undefined : comoInstante(dia),
+        }),
+      }),
+    onSuccess: onListo,
+    onError: (e: ApiError) => setError(e.message),
+  });
+
+  return (
+    <Tarjeta titulo="Corregir el saldo">
+      <div className="space-y-3">
+        <Aviso tono="info">
+          Escribe <strong>en cuánto tiene que quedar</strong> y el sistema calcula la diferencia.
+          No se borra nada: queda un documento con el motivo, y lo anterior sigue en el historial.
+        </Aviso>
+
+        <Seleccion
+          etiqueta="¿Qué saldo?"
+          valor={moneda}
+          onChange={setMoneda}
+          opciones={MONEDAS.map((m) => ({
+            valor: m,
+            texto: `${m} — ahora ${formatMoney(money(persona.saldos?.[m] ?? '0', m))}`,
+          }))}
+        />
+
+        <CampoDinero
+          etiqueta="Tiene que quedar en"
+          valor={nuevoSaldo}
+          onChange={setNuevoSaldo}
+          moneda={moneda}
+          autoFocus
+        />
+
+        {diferencia && !diferencia.isZero() && (
+          <p className="tabular text-sm">
+            <span className="opacity-60">{baja ? 'Le bajas ' : 'Le subes '}</span>
+            <strong>{formatMoney(money(diferencia.abs().toString(), moneda))}</strong>
+            <span className="opacity-60">
+              {' '}
+              — de {formatMoney(money(actual.toString(), moneda))} a{' '}
+              {formatMoney(money(objetivo!.toString(), moneda))}
+            </span>
+          </p>
+        )}
+
+        {diferencia?.isZero() && (
+          <p className="text-sm opacity-60">Ya está en ese valor: no hay nada que ajustar.</p>
+        )}
+
+        <Seleccion
+          etiqueta="¿Por qué cambia?"
+          valor={tipoElegido}
+          onChange={setTipo}
+          opciones={tiposValidos.map((t) => ({
+            valor: t,
+            texto:
+              t === 'DEVOLUCION'
+                ? 'Devolvió mercancía'
+                : t === 'DESCUENTO'
+                  ? 'Descuento o deuda perdonada'
+                  : t === 'DEUDA'
+                    ? 'Faltaba anotar una deuda'
+                    : 'Corrección de un error',
+          }))}
+        />
+
+        <Campo
+          etiqueta="Explica el motivo"
+          valor={concepto}
+          onChange={setConcepto}
+          placeholder={baja ? 'Devolvió 5 bultos de papa' : 'Faltaba el viaje del sábado'}
+        />
+
+        <CampoFecha valor={dia} onChange={setDia} etiqueta="¿Qué día fue?" />
+
+        {baja && tipoElegido === 'DEVOLUCION' && (
+          <Aviso tono="atencion">
+            Esto baja la deuda pero <strong>no devuelve la mercancía al inventario</strong>. Si los
+            bultos volvieron al almacén, anótalos también desde Inventario → Cantidad.
+          </Aviso>
+        )}
+
+        {error && <Aviso tono="error">{error}</Aviso>}
+
+        <div className="flex gap-2">
+          <Boton variante="secundario" onClick={onCancelar} className="flex-1">
+            Cancelar
+          </Boton>
+          <Boton
+            onClick={() => guardar.mutate()}
+            disabled={
+              !concepto.trim() ||
+              nuevoSaldo === '' ||
+              Boolean(diferencia?.isZero()) ||
+              guardar.isPending
+            }
+            className="flex-1"
+          >
+            {guardar.isPending ? 'Guardando…' : 'Confirmar'}
+          </Boton>
+        </div>
+      </div>
     </Tarjeta>
   );
 }

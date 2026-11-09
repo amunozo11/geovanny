@@ -395,6 +395,13 @@ export async function informeDelDia(dia: string) {
  * No se valida contra lo calculado a propósito. Si contó 20 mil menos, eso es un
  * dato, no un error que haya que impedir: se guarda tal cual y la pantalla
  * enseña la diferencia para que se pueda buscar de dónde salió.
+ *
+ * Una moneda que no viene —o viene en blanco— **no se cuenta como cero**: nadie
+ * dijo que no hubiera nada, solo que no se contó. Guardar ahí un cero borraba
+ * del arrastre lo que sí había en el cajón (el 17 de octubre quedaron 166
+ * dólares calculados y el martes arrancó en cero). En su lugar se deja lo
+ * calculado, que es lo único que el sistema sabe. Un cero escrito a propósito
+ * sí es un cero.
  */
 export async function guardarCierre(entrada: {
   dia: string;
@@ -402,9 +409,16 @@ export async function guardarCierre(entrada: {
   observacion?: string;
   cerradoPor?: string | null;
 }) {
+  const sinContar = MONEDAS.filter((m) => (entrada.sobrante[m] ?? '').trim() === '');
+  // El "debería quedar" de un día no depende del cierre de ese mismo día, así
+  // que se puede leer antes de guardarlo.
+  const calculado = sinContar.length > 0 ? (await informeDelDia(entrada.dia)).deberiaQuedar : null;
+
   const sobrante = sobranteVacio();
   for (const m of MONEDAS) {
-    sobrante[m] = D(entrada.sobrante[m] ?? '0').toString();
+    sobrante[m] = sinContar.includes(m)
+      ? D(calculado![m]).toString()
+      : D(entrada.sobrante[m]!).toString();
   }
 
   // Al cerrar se clava la tasa del día. A partir de aquí ese reporte da los

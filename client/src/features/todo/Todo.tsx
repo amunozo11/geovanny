@@ -832,6 +832,9 @@ function NuevoGasto({ dia, onListo }: { dia: string; onListo: () => void }) {
  * No se valida contra lo calculado a propósito. Si contó 20 mil menos, eso es un
  * dato —no un error que haya que impedir—: se guarda tal cual y la diferencia
  * queda a la vista para poder buscar de dónde salió.
+ *
+ * Lo que sí se avisa es un campo en blanco: no es un cero, es algo que no se
+ * contó. Antes de guardar se pide confirmar, y si se confirma queda lo calculado.
  */
 function FormularioCierre({
   informe,
@@ -846,18 +849,23 @@ function FormularioCierre({
   const [observacion, setObservacion] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [guardado, setGuardado] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
 
   // Al cambiar de día se recarga lo que ya estuviera cerrado, si lo hubiera.
   useEffect(() => {
     const valores: Partial<Record<Moneda, string>> = {};
     for (const m of MONEDAS) {
-      const valor = informe.cierre?.sobrante[m];
-      valores[m] = valor && valor !== '0' ? valor : '';
+      // Un 0 ya guardado se enseña como 0: era un conteo, no un campo vacío.
+      valores[m] = informe.cierre?.sobrante[m] ?? '';
     }
     setSobrante(valores);
     setObservacion(informe.cierre?.observacion ?? '');
     setGuardado(false);
+    setConfirmando(false);
   }, [informe.dia, informe.cierre]);
+
+  /** Las monedas del día que se dejaron sin contar. */
+  const sinContar = monedas.filter((m) => (sobrante[m] ?? '').trim() === '');
 
   const guardar = useMutation({
     mutationFn: () =>
@@ -865,17 +873,30 @@ function FormularioCierre({
         method: 'POST',
         body: JSON.stringify({
           dia: informe.dia,
-          sobrante: Object.fromEntries(MONEDAS.map((m) => [m, sobrante[m] || '0'])),
+          // Lo que está en blanco no se manda: el servidor deja ahí lo calculado
+          // en vez de un cero que borraría lo que haya en el cajón.
+          sobrante: Object.fromEntries(
+            MONEDAS.filter((m) => (sobrante[m] ?? '').trim() !== '').map((m) => [m, sobrante[m]]),
+          ),
           observacion,
         }),
       }),
     onSuccess: () => {
       setGuardado(true);
+      setConfirmando(false);
       setError(null);
       onListo();
     },
     onError: (e: ApiError) => setError(e.message),
   });
+
+  const intentarGuardar = () => {
+    if (sinContar.length > 0 && !confirmando) {
+      setConfirmando(true);
+      return;
+    }
+    guardar.mutate();
+  };
 
   /** Lo contado menos lo que debería haber, en vivo mientras se escribe. */
   const diferencia = (m: Moneda) =>
@@ -898,7 +919,10 @@ function FormularioCierre({
               <CampoDinero
                 etiqueta={`${NOMBRE[m]} contados`}
                 valor={sobrante[m] ?? ''}
-                onChange={(v) => setSobrante((previo) => ({ ...previo, [m]: v }))}
+                onChange={(v) => {
+                  setSobrante((previo) => ({ ...previo, [m]: v }));
+                  setConfirmando(false);
+                }}
                 moneda={m}
                 placeholder={informe.deberiaQuedar[m]}
               />
@@ -932,16 +956,26 @@ function FormularioCierre({
           </Aviso>
         )}
 
-        <Boton
-          onClick={() => guardar.mutate()}
-          disabled={guardar.isPending}
-          className="w-full"
-        >
+        {confirmando && sinContar.length > 0 && (
+          <Aviso tono="atencion">
+            <p>
+              No escribiste{' '}
+              {sinContar.map((m) => NOMBRE[m].toLowerCase()).join(' ni ')}. Si guardas así, se
+              queda lo calculado (
+              {sinContar.map((m) => formatMoney(money(informe.deberiaQuedar[m], m))).join(' · ')})
+              como lo que hay en el cajón, y mañana arrancas con eso. Si no hay nada, escribe 0.
+            </p>
+          </Aviso>
+        )}
+
+        <Boton onClick={intentarGuardar} disabled={guardar.isPending} className="w-full">
           {guardar.isPending
             ? 'Guardando…'
-            : informe.cierre
-              ? 'Actualizar el cierre'
-              : 'Guardar el cierre del día'}
+            : confirmando
+              ? 'Sí, guardar con lo calculado'
+              : informe.cierre
+                ? 'Actualizar el cierre'
+                : 'Guardar el cierre del día'}
         </Boton>
       </div>
     </Tarjeta>

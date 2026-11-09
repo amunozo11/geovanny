@@ -1,6 +1,11 @@
 import mongoose, { Types } from 'mongoose';
 import { D, crearImporte, type Moneda, type TasaDelDia } from '@geovanny/shared';
-import { CargoModel, type TipoCargo } from '../models/cargo.js';
+import {
+  CargoModel,
+  DIRECCION_POR_TIPO,
+  type DireccionCargo,
+  type TipoCargo,
+} from '../models/cargo.js';
 import { PersonaModel } from '../models/persona.js';
 import { siguienteNumero } from '../models/contador.js';
 import { BusinessRuleError, NotFoundError } from '../lib/errors.js';
@@ -10,6 +15,8 @@ import { registrarMovimiento } from './cajas.service.js';
 export interface RegistrarCargo {
   personaId: string;
   tipo: TipoCargo;
+  /** Obligatoria solo en `AJUSTE`; los demás tipos ya la traen puesta. */
+  direccion?: DireccionCargo;
   concepto: string;
   monto: string;
   moneda: Moneda;
@@ -44,11 +51,23 @@ export async function registrarCargo(entrada: RegistrarCargo) {
   const persona = await PersonaModel.findById(entrada.personaId);
   if (!persona) throw new NotFoundError('No se encontró la persona.');
 
+  const direccion = entrada.direccion ?? DIRECCION_POR_TIPO[entrada.tipo];
+  if (!direccion) {
+    throw new BusinessRuleError(
+      'SIN_DIRECCION',
+      'Di si el ajuste sube o baja la deuda: un monto suelto no dice nada.',
+    );
+  }
+
   const tasa = entrada.tasaOriginal ?? (await tasaPara(persona));
   const importe = crearImporte(monto.toString(), entrada.moneda, tasa);
+
   // Prestar es entregar plata; anotar una deuda vieja, no. El usuario lo dice,
-  // porque solo él sabe si el billete salió del cajón.
-  const salioDeCaja = entrada.salioDeCaja ?? entrada.tipo === 'PRESTAMO';
+  // porque solo él sabe si el billete salió del cajón. Lo que BAJA la deuda
+  // nunca mueve caja: una devolución o un descuento no entregan dinero, y
+  // registrarlos como si lo hicieran descuadraría el cierre del día.
+  const salioDeCaja =
+    direccion === 'BAJA' ? false : (entrada.salioDeCaja ?? entrada.tipo === 'PRESTAMO');
 
   const session = await mongoose.startSession();
   try {
@@ -64,10 +83,13 @@ export async function registrarCargo(entrada: RegistrarCargo) {
             personaId: persona._id,
             personaNombre: persona.nombre,
             tipo: entrada.tipo,
+            direccion,
             concepto: entrada.concepto.trim(),
             importe,
             moneda: entrada.moneda,
-            saldo: monto.toString(),
+            // Un cargo que BAJA no es algo que se deba: ya descontó, así que
+            // los abonos no deben intentar saldarlo.
+            saldo: direccion === 'BAJA' ? '0' : monto.toString(),
             salioDeCaja,
             fecha: entrada.fecha ? new Date(entrada.fecha) : new Date(),
             nota: entrada.nota ?? null,
@@ -96,9 +118,10 @@ export async function registrarCargo(entrada: RegistrarCargo) {
       }
 
       const actual = D(persona.saldos[entrada.moneda] ?? '0');
+      const despues = direccion === 'BAJA' ? actual.minus(monto) : actual.plus(monto);
       await PersonaModel.updateOne(
         { _id: persona._id },
-        { $set: { [`saldos.${entrada.moneda}`]: actual.plus(monto).toString() } },
+        { $set: { [`saldos.${entrada.moneda}`]: despues.toString() } },
         { session },
       );
     });
@@ -122,7 +145,9 @@ export async function anularCargo(id: string, motivo: string, usuarioId?: string
   if (cargo.estado === 'ANULADO') {
     throw new BusinessRuleError('YA_ANULADO', 'Este cargo ya estaba anulado.');
   }
-  if (!D(cargo.saldo).equals(D(cargo.importe.monto))) {
+  // Un cargo que BAJA no recibe abonos (nace con saldo cero), así que esta
+  // comprobación solo tiene sentido en los que suben.
+  if (cargo.direccion !== 'BAJA' && !D(cargo.saldo).equals(D(cargo.importe.monto))) {
     throw new BusinessRuleError(
       'TIENE_ABONOS',
       'Este cargo ya tiene abonos aplicados. Anula primero los abonos.',
@@ -153,13 +178,15 @@ export async function anularCargo(id: string, motivo: string, usuarioId?: string
       const persona = await PersonaModel.findById(cargo.personaId).session(session);
       if (persona) {
         const actual = D(persona.saldos[cargo.moneda] ?? '0');
+        // Se deshace en el sentido contrario al que fue.
+        const despues =
+          cargo.direccion === 'BAJA'
+            ? actual.plus(D(cargo.importe.monto))
+            : actual.minus(D(cargo.importe.monto));
+
         await PersonaModel.updateOne(
           { _id: persona._id },
-          {
-            $set: {
-              [`saldos.${cargo.moneda}`]: actual.minus(D(cargo.importe.monto)).toString(),
-            },
-          },
+          { $set: { [`saldos.${cargo.moneda}`]: despues.toString() } },
           { session },
         );
       }
@@ -201,6 +228,7 @@ export async function corregirCargo(
 
   const nuevo = {
     tipo: entrada.tipo ?? cargo.tipo,
+    direccion: entrada.direccion ?? cargo.direccion,
     concepto: entrada.concepto ?? cargo.concepto,
     monto: entrada.monto ?? cargo.importe.monto,
     moneda: entrada.moneda ?? cargo.moneda,
@@ -212,6 +240,7 @@ export async function corregirCargo(
   const tocaElDinero =
     !D(nuevo.monto).equals(D(cargo.importe.monto)) ||
     nuevo.moneda !== cargo.moneda ||
+    nuevo.direccion !== cargo.direccion ||
     nuevo.salioDeCaja !== cargo.salioDeCaja ||
     nuevo.fecha !== cargo.fecha.toISOString() ||
     entrada.cajaId !== undefined;
@@ -233,6 +262,7 @@ export async function corregirCargo(
   const corregido = await registrarCargo({
     personaId: cargo.personaId.toString(),
     tipo: nuevo.tipo,
+    direccion: nuevo.direccion,
     concepto: nuevo.concepto,
     monto: nuevo.monto,
     moneda: nuevo.moneda,
@@ -251,4 +281,72 @@ export async function corregirCargo(
   );
 
   return corregido;
+}
+
+/**
+ * Dejar el saldo de una persona en un valor concreto.
+ *
+ * Se dice **en cuánto tiene que quedar** y el sistema calcula la diferencia,
+ * igual que el conteo del inventario. Es la forma en que se piensa de verdad
+ * —"debe 1.500 y tiene que quedar en 1.000"— y evita la resta mental, que es
+ * justo donde se cometen los errores.
+ *
+ * No escribe el saldo por encima: crea el documento que falta para llegar a esa
+ * cifra. El saldo sigue siendo la consecuencia de sus movimientos, nunca un
+ * número puesto a mano, así que dentro de un mes todavía se puede responder por
+ * qué bajó y quién lo decidió.
+ */
+export async function ajustarSaldo(entrada: {
+  personaId: string;
+  moneda: Moneda;
+  /** En cuánto tiene que quedar la deuda. Puede ser cero para saldarla. */
+  nuevoSaldo: string;
+  /** `DEVOLUCION`, `DESCUENTO` o `AJUSTE`. El que suba o baje se deduce solo. */
+  tipo?: TipoCargo;
+  concepto: string;
+  fecha?: string | null;
+  nota?: string | null;
+  creadoPor?: string | null;
+}) {
+  const persona = await PersonaModel.findById(entrada.personaId);
+  if (!persona) throw new NotFoundError('No se encontró la persona.');
+
+  const actual = D(persona.saldos[entrada.moneda] ?? '0');
+  const objetivo = D(entrada.nuevoSaldo);
+  const diferencia = objetivo.minus(actual);
+
+  if (diferencia.isZero()) {
+    throw new BusinessRuleError(
+      'SIN_DIFERENCIA',
+      `El saldo ya está en ${actual.toString()} ${entrada.moneda}: no hay nada que ajustar.`,
+    );
+  }
+
+  const direccion: DireccionCargo = diferencia.isNegative() ? 'BAJA' : 'SUBE';
+
+  // Un tipo que empuja al revés de lo que se pide sería mentira en el papel:
+  // una "devolución" que sube la deuda no es una devolución.
+  const tipo = entrada.tipo ?? (direccion === 'BAJA' ? 'DEVOLUCION' : 'DEUDA');
+  const esperada = DIRECCION_POR_TIPO[tipo];
+  if (esperada && esperada !== direccion) {
+    throw new BusinessRuleError(
+      'DIRECCION_CONTRARIA',
+      direccion === 'BAJA'
+        ? `Para bajar el saldo usa una devolución, un descuento o un ajuste, no "${tipo.toLowerCase()}".`
+        : `Para subir el saldo usa una deuda, un préstamo o un ajuste, no "${tipo.toLowerCase()}".`,
+    );
+  }
+
+  return registrarCargo({
+    personaId: entrada.personaId,
+    tipo,
+    direccion,
+    concepto: entrada.concepto,
+    monto: diferencia.abs().toString(),
+    moneda: entrada.moneda,
+    salioDeCaja: false,
+    fecha: entrada.fecha,
+    nota: entrada.nota,
+    creadoPor: entrada.creadoPor,
+  });
 }

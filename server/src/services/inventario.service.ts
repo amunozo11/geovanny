@@ -1,9 +1,10 @@
 import mongoose, { Types } from 'mongoose';
-import { D, crearImporte, type Moneda } from '@geovanny/shared';
+import { D, crearImporte, type Decimal, type Moneda } from '@geovanny/shared';
 import { ProductoModel } from '../models/producto.js';
 import { MovimientoModel, type TipoMovimiento } from '../models/movimiento.js';
 import { BusinessRuleError, NotFoundError } from '../lib/errors.js';
 import { tasaVigente } from './tasas.service.js';
+import { diaDeHoy, rangoDelDia } from '../lib/dias.js';
 
 export interface DatosProducto {
   nombre: string;
@@ -266,4 +267,91 @@ export async function verificarStock() {
   }
 
   return { todoCorrecto: revisiones.every((r) => r.coincide), revisiones };
+}
+
+/**
+ * Las existencias de un día: con cuánto se arrancó, qué se movió y cómo quedó.
+ *
+ * El stock de un producto es la suma de sus movimientos (RC-10), así que el de
+ * cualquier momento se puede reconstruir sumando los anteriores. Eso permite
+ * responder la pregunta que hoy no se puede: *"¿con cuánto arranqué hoy y con
+ * cuánto arranqué ayer?"*, y ver si lo que falta se explica con lo que salió o
+ * si hay un hueco.
+ *
+ * No se guarda ninguna foto diaria: se calcula. Una foto se desincroniza en
+ * cuanto alguien corrige un movimiento viejo; esto siempre cuadra con el libro.
+ */
+export async function existenciasDelDia(dia: string) {
+  const { desde, hasta } = rangoDelDia(dia);
+
+  const productos = await ProductoModel.find({ activo: true }).sort({ nombre: 1 });
+  const ids = productos.map((p) => p._id);
+
+  const [despues, enElDia] = await Promise.all([
+    MovimientoModel.find(
+      { productoId: { $in: ids }, fecha: { $gte: hasta } },
+      { productoId: 1, cantidad: 1 },
+    ),
+    MovimientoModel.find({ productoId: { $in: ids }, fecha: { $gte: desde, $lt: hasta } }).sort({
+      fecha: 1,
+    }),
+  ]);
+
+  /**
+   * Se cuenta hacia atrás desde el stock de ahora, no hacia delante desde cero.
+   *
+   * Sumar los movimientos anteriores al día daría el número equivocado para un
+   * producto cuyo stock no salió entero del libro —uno creado con existencias
+   * ya puestas, o traído de una importación—. Partiendo de lo que hay hoy y
+   * deshaciendo lo posterior, la cifra siempre cuadra con lo que la persona ve
+   * en el inventario, que es contra lo que va a comparar.
+   */
+  const posteriorPor = new Map<string, Decimal>();
+  for (const m of despues) {
+    const clave = m.productoId.toString();
+    posteriorPor.set(clave, (posteriorPor.get(clave) ?? D(0)).plus(D(m.cantidad)));
+  }
+
+  const filas = productos.map((producto) => {
+    const clave = producto._id.toString();
+    const suyos = enElDia.filter((m) => m.productoId.toString() === clave);
+
+    const entro = suyos
+      .filter((m) => D(m.cantidad).greaterThan(0))
+      .reduce((acc, m) => acc.plus(D(m.cantidad)), D(0));
+    const salio = suyos
+      .filter((m) => D(m.cantidad).isNegative())
+      .reduce((acc, m) => acc.plus(D(m.cantidad).abs()), D(0));
+
+    const final = D(producto.stock).minus(posteriorPor.get(clave) ?? D(0));
+    const inicial = final.minus(entro).plus(salio);
+
+    return {
+      id: clave,
+      nombre: producto.nombre,
+      unidad: producto.unidad,
+      inicial: inicial.toString(),
+      entro: entro.toString(),
+      salio: salio.toString(),
+      final: final.toString(),
+      /** Lo que tiene el producto ahora mismo, para poder contrastar. */
+      actual: producto.stock,
+      movimientos: suyos.map((m) => ({
+        id: m._id.toString(),
+        tipo: m.tipo,
+        cantidad: m.cantidad,
+        motivo: m.motivo,
+        refNumero: m.refNumero,
+        fecha: m.fecha,
+      })),
+    };
+  });
+
+  return {
+    dia,
+    esHoy: dia === diaDeHoy(),
+    productos: filas.filter(
+      (f) => f.movimientos.length > 0 || !D(f.inicial).isZero() || !D(f.final).isZero(),
+    ),
+  };
 }
